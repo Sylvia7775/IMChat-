@@ -451,14 +451,14 @@ export default function VoiceRecorderCapture({ onClose }: VoiceRecorderCapturePr
               <div className="flex items-center justify-between">
                 <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-wider flex items-center gap-1">
                   <Sliders className="w-3.5 h-3.5 text-rose-500" />
-                  Etapa de Ganancia (Normalize & Boost Voice)
+                  Gain Stage (Normalize & Boost Voice)
                 </span>
                 <span className="text-rose-400 text-xs font-black bg-rose-500/10 px-2 py-0.5 rounded-md">
                   {gainValue === 1.0 ? 'Normal (1.0x)' : `${gainValue.toFixed(1)}x Boost`}
                 </span>
               </div>
               <p className="text-[10px] text-slate-500 text-left leading-normal">
-                Normaliza o amplifica el volumen del micrófono en tiempo real para obtener grabaciones de voz más nítidas y audibles.
+                Normalize or boost your microphone volume in real-time to get crisp, audible voice recordings.
               </p>
               <div className="flex items-center gap-3 mt-1.5 cursor-pointer">
                 <span className="text-slate-500 text-[10px] font-black uppercase tracking-wider">1.0x</span>
@@ -482,7 +482,7 @@ export default function VoiceRecorderCapture({ onClose }: VoiceRecorderCapturePr
               {formatTime(recordingTime)}
             </span>
             <span className="text-[10px] uppercase font-black tracking-wider text-slate-500">
-              {isRecording ? (isPaused ? 'Pausado' : 'Grabando entrada de micrófono') : audioUrl ? 'Grabación finalizada' : 'Listo para grabar'}
+              {isRecording ? (isPaused ? 'Paused' : 'Recording microphone input') : audioUrl ? 'Recording finished' : 'Ready to record'}
             </span>
           </div>
 
@@ -494,7 +494,7 @@ export default function VoiceRecorderCapture({ onClose }: VoiceRecorderCapturePr
                 type="button"
                 onClick={handleReset}
                 className="w-12 h-12 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center justify-center active:scale-90 transition-all border border-slate-700"
-                title="Borrar y Grabar de Nuevo"
+                title="Delete and Record Again"
               >
                 <RefreshCw className="w-5 h-5" />
               </button>
@@ -507,7 +507,7 @@ export default function VoiceRecorderCapture({ onClose }: VoiceRecorderCapturePr
                     ? 'bg-rose-500/20 border-rose-500/40 text-rose-400' 
                     : 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-300'
                 }`}
-                title={isPaused ? 'Reanudar' : 'Pausar'}
+                title={isPaused ? 'Resume' : 'Pause'}
               >
                 {isPaused ? <Play className="w-5 h-5 fill-current" /> : <Pause className="w-5 h-5 fill-current" />}
               </button>
@@ -578,7 +578,7 @@ export default function VoiceRecorderCapture({ onClose }: VoiceRecorderCapturePr
                   <textarea
                     value={caption}
                     onChange={(e) => setCaption(e.target.value)}
-                    placeholder="Escribe un copy o hashtag sobre tu mensaje de voz..."
+                    placeholder="Write a caption or hashtag for your voice message..."
                     maxLength={250}
                     className="w-full bg-slate-950 border border-slate-800 rounded-2xl p-3.5 text-slate-100 text-[13px] font-medium placeholder-slate-500 focus:outline-none focus:border-rose-500 transition-colors resize-none h-20"
                   />
@@ -600,7 +600,7 @@ export default function VoiceRecorderCapture({ onClose }: VoiceRecorderCapturePr
                       }`}
                     >
                       <Globe className="w-3.5 h-3.5" />
-                      <span>Todo Público</span>
+                      <span>Public</span>
                     </button>
                     <button
                       type="button"
@@ -612,7 +612,7 @@ export default function VoiceRecorderCapture({ onClose }: VoiceRecorderCapturePr
                       }`}
                     >
                       <Users className="w-3.5 h-3.5" />
-                      <span>Elegir Amigos</span>
+                      <span>Choose Friends</span>
                     </button>
                   </div>
                 </div>
@@ -627,7 +627,7 @@ export default function VoiceRecorderCapture({ onClose }: VoiceRecorderCapturePr
                       className="w-full flex flex-col gap-2 mt-1 overflow-hidden"
                     >
                       <div className="text-[11px] font-black uppercase tracking-wider text-slate-400 flex justify-between items-center pl-1">
-                        <span>Selecciona Amigos ({selectedFriends.length} elegidos)</span>
+                        <span>Select Friends ({selectedFriends.length} selected)</span>
                         {friendsList.length > 0 && (
                           <button
                             type="button"
@@ -640,7 +640,7 @@ export default function VoiceRecorderCapture({ onClose }: VoiceRecorderCapturePr
                             }}
                             className="text-[10px] text-rose-400 hover:underline hover:text-rose-300 transition-colors font-bold uppercase"
                           >
-                            {selectedFriends.length === friendsList.length ? 'Ninguno' : 'Todos'}
+                            {selectedFriends.length === friendsList.length ? 'None' : 'All'}
                           </button>
                         )}
                       </div>
@@ -652,7 +652,7 @@ export default function VoiceRecorderCapture({ onClose }: VoiceRecorderCapturePr
                           type="text"
                           value={friendSearchQuery}
                           onChange={(e) => setFriendSearchQuery(e.target.value)}
-                          placeholder="Buscar amig@ por nombre..."
+                          placeholder="Search friend by name..."
                           className="w-full bg-transparent text-xs text-slate-200 placeholder-slate-500 focus:outline-none"
                         />
                         {friendSearchQuery && (
@@ -673,7 +673,7 @@ export default function VoiceRecorderCapture({ onClose }: VoiceRecorderCapturePr
                           (f.username || '').toLowerCase().includes(friendSearchQuery.toLowerCase())
                         ).length === 0 ? (
                           <div className="text-center py-4 text-xs text-slate-500 font-bold">
-                            No se encontraron usuarios en la red
+                            No users found in the network
                           </div>
                         ) : (
                           friendsList.filter(f => 

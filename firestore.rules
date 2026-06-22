@@ -69,13 +69,15 @@ service cloud.firestore {
     match /posts/{postId} {
       allow read, list: if isSignedIn() && canAccess();
       allow create: if isSignedIn() && canAccess() && !isRestricted();
-      allow update, delete: if isSignedIn() && (resource.data.userId == userId() || isModerator());
+      allow update: if isSignedIn() && canAccess() && !isRestricted();
+      allow delete: if isSignedIn() && (resource.data.userId == userId() || isModerator());
     }
     
     match /reels/{reelId} {
       allow read, list: if isSignedIn() && canAccess();
       allow create: if isSignedIn() && canAccess() && !isRestricted();
-      allow update, delete: if isSignedIn() && (resource.data.userId == userId() || isModerator());
+      allow update: if isSignedIn() && canAccess() && !isRestricted();
+      allow delete: if isSignedIn() && (resource.data.userId == userId() || isModerator());
     }
 
     match /media/{mediaId} {
@@ -144,7 +146,8 @@ service cloud.firestore {
     match /channels/{channelId} {
       allow read, list: if isSignedIn() && canAccess();
       allow create: if isSignedIn() && canAccess();
-      allow update, delete: if isSignedIn() && (resource.data.ownerId == userId() || isModerator() || isAdmin());
+      allow update: if isSignedIn() && canAccess();
+      allow delete: if isSignedIn() && (resource.data.ownerId == userId() || isModerator() || isAdmin());
     }
 
     match /typing_states/{stateId} {

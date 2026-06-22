@@ -39,6 +39,7 @@ import { db, auth, handleFirestoreError, OperationType } from './firebase';
 import { sendPasswordResetEmail } from 'firebase/auth';
 import { collection, doc, onSnapshot, setDoc, addDoc, serverTimestamp, query, orderBy, limit, deleteDoc, updateDoc } from 'firebase/firestore';
 import { PostStore } from './lib/PostStore';
+import { GroupStore } from './lib/GroupStore';
 import SettingsPage from './SettingsPage';
 
 interface AdminDashboardProps {
@@ -336,10 +337,15 @@ export default function AdminDashboard({ onBack, onVisitProfile, brandingProps, 
     { id: 'm1', name: 'Retro Camera', price: '$120', seller: 'Zoya Petrov', category: 'Electronics' },
   ]);
 
-  const [groups, setGroups] = useState([
-    { id: 'g1', name: 'Tech Enthusiasts', members: 124, privacy: 'Public' },
-    { id: 'g2', name: 'Art Club', members: 45, privacy: 'Private' },
-  ]);
+  const [groups, setGroups] = useState<any[]>([]);
+
+  useEffect(() => {
+    setGroups(GroupStore.getGroups());
+    const unsub = GroupStore.subscribe(() => {
+      setGroups(GroupStore.getGroups());
+    });
+    return () => unsub();
+  }, []);
 
   const [channels, setChannels] = useState<any[]>([]);
   const [selectedChannels, setSelectedChannels] = useState<string[]>([]);
@@ -458,8 +464,10 @@ export default function AdminDashboard({ onBack, onVisitProfile, brandingProps, 
       case 'reports': setReports(reports.filter(r => r.id !== id)); break;
       case 'marketplace': setMarketItems(marketItems.filter(i => i.id !== id)); break;
       case 'groups': 
-        alert("Action barred! User-created groups cannot be deleted by administrators or moderators. Only the group owner can delete their group.");
-        return;
+        if (window.confirm("Are you sure you want to delete this group?")) {
+          GroupStore.deleteGroup(id);
+        }
+        break;
       case 'channels': 
         try { 
           await deleteDoc(doc(db, 'channels', id)); 
@@ -1064,6 +1072,11 @@ export default function AdminDashboard({ onBack, onVisitProfile, brandingProps, 
                               }`}>
                                 {user.role === 'user' ? memberRoleName : (user.role || 'Member')}
                               </span>
+                              {user.isFrozen && (
+                                <span className="px-2 py-0.5 rounded bg-blue-50 text-blue-600 border border-blue-100 text-[8px] font-extrabold uppercase shrink-0">
+                                  ❄️ Frozen
+                                </span>
+                              )}
                             </div>
                           </td>
                           <td className="px-6 py-4">
@@ -1109,8 +1122,35 @@ export default function AdminDashboard({ onBack, onVisitProfile, brandingProps, 
                       )}
                       <p className="text-gray-600 text-sm mb-4 line-clamp-2">{post.caption}</p>
                       <div className="flex items-center justify-between text-[11px] font-bold text-gray-400 border-t border-gray-50 pt-4">
-                        <span>{post.likes.length} Likes • {new Date(post.timestamp).toLocaleDateString()}</span>
-                        <div className="flex gap-2">
+                        <div className="flex flex-col gap-1.5 flex-1 pr-2">
+                          <span>{typeof post.likesOverride === 'number' ? post.likesOverride : post.likes.length} Likes • {new Date(post.timestamp).toLocaleDateString()}</span>
+                          <div className="flex items-center gap-1.5 mt-0.5">
+                            <span className="text-[10px] text-gray-500 font-medium">Edit:</span>
+                            <input 
+                              type="number" 
+                              min="0"
+                              defaultValue={typeof post.likesOverride === 'number' ? post.likesOverride : post.likes.length}
+                              key={typeof post.likesOverride === 'number' ? post.likesOverride : post.likes.length}
+                              className="w-16 px-1.5 py-0.5 border border-gray-200 rounded text-[10px] text-gray-700 bg-gray-50 font-mono focus:outline-none focus:bg-white focus:ring-1 focus:ring-brand-blue"
+                              onBlur={(e) => {
+                                const val = parseInt(e.target.value);
+                                if (!isNaN(val)) {
+                                  PostStore.updatePostLikesCount(post.id, val);
+                                }
+                              }}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  const val = parseInt((e.target as HTMLInputElement).value);
+                                  if (!isNaN(val)) {
+                                    PostStore.updatePostLikesCount(post.id, val);
+                                    (e.target as HTMLInputElement).blur();
+                                  }
+                                }
+                              }}
+                            />
+                          </div>
+                        </div>
+                        <div className="flex gap-2 shrink-0">
                           <button onClick={() => deleteItem('posts', post.id)} className="text-red-400 hover:text-red-600 transition-colors">Delete</button>
                           <button className="text-brand-blue hover:text-blue-700 transition-colors">Review</button>
                         </div>
@@ -1126,14 +1166,18 @@ export default function AdminDashboard({ onBack, onVisitProfile, brandingProps, 
                     {groups.map(group => (
                        <div key={group.id} className="bg-white rounded-2xl border border-gray-100 p-6 flex flex-col gap-4 shadow-sm hover:shadow-md transition-all text-left">
                           <div className="flex items-center justify-between">
-                             <div className="w-12 h-12 bg-blue-100 rounded-xl flex items-center justify-center text-brand-blue">
-                                <Users className="w-6 h-6" />
+                             <div className="w-12 h-12 bg-blue-100 rounded-xl overflow-hidden flex items-center justify-center text-brand-blue">
+                                {group.coverUrl ? (
+                                  <img src={group.coverUrl} className="w-full h-full object-cover" alt="Group cover" />
+                                ) : (
+                                  <Users className="w-6 h-6" />
+                                )}
                              </div>
-                             <span className="px-3 py-1 bg-gray-50 rounded-full text-[10px] font-bold text-gray-400 uppercase">{group.privacy}</span>
+                             <span className="px-3 py-1 bg-gray-50 rounded-full text-[10px] font-bold text-gray-400 uppercase">{group.isPrivate ? "Private" : "Public"}</span>
                           </div>
                           <div>
-                             <h3 className="font-bold text-gray-900 text-lg">{group.name}</h3>
-                             <p className="text-sm text-gray-500 font-medium">{group.members} Members</p>
+                             <h3 className="font-bold text-gray-900 text-lg line-clamp-1">{group.title}</h3>
+                             <p className="text-sm text-gray-500 font-medium">{group.members?.length || 0} Members</p>
                           </div>
                           <div className="flex items-center gap-2 mt-2">
                              <button className="flex-1 bg-gray-50 hover:bg-gray-100 text-gray-700 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 shadow-sm">
@@ -1737,7 +1781,15 @@ export default function AdminDashboard({ onBack, onVisitProfile, brandingProps, 
                          <input 
                            type="text"
                            defaultValue={editingUser.username}
-                           onChange={(e) => updateDoc(doc(db, "users", editingUser.id), { username: e.target.value })}
+                           onChange={(e) => {
+                             const val = e.target.value;
+                             if (val.toLowerCase().includes('imchat')) {
+                               alert("Validation Error: Usernames cannot contain the blacklisted word 'imchat'. Please choose a different username.");
+                               e.target.value = editingUser.username || '';
+                               return;
+                             }
+                             updateDoc(doc(db, "users", editingUser.id), { username: val });
+                           }}
                            className="w-full px-4 py-3 bg-gray-50 border border-gray-100 rounded-xl outline-none focus:ring-2 focus:ring-blue-500/10 text-sm font-medium"
                          />
                        </div>
@@ -1837,7 +1889,32 @@ export default function AdminDashboard({ onBack, onVisitProfile, brandingProps, 
                           </button>
                        </div>
 
-                       <div className="flex items-center justify-between border-t border-red-100 pt-4">
+                                               <div className="flex items-center justify-between border-t border-blue-100 pt-4">
+                           <div className="space-y-0.5">
+                              <div className="text-sm font-bold text-blue-900">Freeze Account</div>
+                              <div className="text-[10px] text-blue-600 font-medium leading-tight">Restrict user from posting and messaging, leaving browsing working.</div>
+                           </div>
+                           <button 
+                              type="button"
+                              onClick={async () => {
+                                const newFrozenState = !editingUser.isFrozen;
+                                try {
+                                  await updateDoc(doc(db, "users", editingUser.id), { isFrozen: newFrozenState });
+                                  setEditingUser({ ...editingUser, isFrozen: newFrozenState });
+                                  alert(newFrozenState ? "User profile is FROZEN! They can browse but not post or message." : "User profile is unfrozen.");
+                                } catch (err) {
+                                  console.error("Failed to freeze user:", err);
+                                }
+                              }}
+                              className={`px-4 py-2 rounded-xl text-[10px] font-bold uppercase transition-all shadow-sm ${
+                                editingUser.isFrozen ? 'bg-amber-600 text-white hover:bg-amber-700' : 'bg-blue-600 text-white hover:bg-blue-700'
+                              }`}
+                           >
+                              {editingUser.isFrozen ? 'Unfreeze' : 'Freeze'}
+                           </button>
+                        </div>
+
+<div className="flex items-center justify-between border-t border-red-100 pt-4">
                           <div className="space-y-0.5">
                              <div className="text-sm font-bold text-red-900">Ban Account</div>
                              <div className="text-[10px] text-red-600 font-medium leading-tight">Restrict user access to all features instantly.</div>
@@ -2129,22 +2206,60 @@ export default function AdminDashboard({ onBack, onVisitProfile, brandingProps, 
                   </button>
                 </div>
                 <form 
-                  onSubmit={(e) => {
+                  onSubmit={async (e) => {
                     e.preventDefault();
                     const formData = new FormData(e.currentTarget);
-                    const name = formData.get('name') as string;
-                    const members = parseInt(formData.get('members') as string) || 0;
-                    const privacy = formData.get('privacy') as string;
+                    const title = formData.get('title') as string;
+                    const membersCountStr = formData.get('membersCount') as string;
+                    const isPrivate = formData.get('privacy') === 'PRIVATE';
+                    
+                    const addedMembersCount = parseInt(membersCountStr) || 0;
                     
                     if (showNewGroupModal) {
-                      setGroups(prev => [...prev, {
-                        id: `group${Date.now()}`,
-                        name,
-                        members,
-                        privacy
-                      }]);
+                      // Generate mock members if needed to respect the 'add number of group members' request
+                      const mockMembers = [];
+                      for (let i = 0; i < addedMembersCount; i++) {
+                        mockMembers.push({
+                          userId: `mock_${Date.now()}_${i}`,
+                          name: `Mock Member ${i+1}`,
+                          role: 'member',
+                          avatar: 'https://via.placeholder.com/150'
+                        });
+                      }
+                      
+                      await GroupStore.addGroup({
+                        uid: `im_g_${Date.now()}`,
+                        title,
+                        description: 'Created by Admin',
+                        coverUrl: '',
+                        isPrivate,
+                        members: mockMembers,
+                      } as any);
                     } else if (editingGroup) {
-                      setGroups(prev => prev.map(g => g.id === editingGroup.id ? { ...g, name, members, privacy } : g));
+                      // Add mock members to existing array if requested to increase it
+                      const updatedMembers = [...(editingGroup.members || [])];
+                      const currentLength = updatedMembers.length;
+                      
+                      if (addedMembersCount > currentLength) {
+                        const needed = addedMembersCount - currentLength;
+                        for (let i = 0; i < needed; i++) {
+                          updatedMembers.push({
+                            userId: `mock_${Date.now()}_${i}`,
+                            name: `Added Member ${i+1}`,
+                            role: 'member',
+                            avatar: 'https://via.placeholder.com/150'
+                          });
+                        }
+                      } else if (addedMembersCount < currentLength) {
+                         // remove members if count is lower
+                         updatedMembers.splice(addedMembersCount);
+                      }
+                      
+                      await GroupStore.updateGroup(editingGroup.id, { 
+                        title, 
+                        isPrivate,
+                        members: updatedMembers 
+                      });
                     }
                     
                     setEditingGroup(null);
@@ -2155,19 +2270,19 @@ export default function AdminDashboard({ onBack, onVisitProfile, brandingProps, 
                   <div className="space-y-2">
                     <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest pl-1">Group Name</label>
                     <input 
-                      name="name"
-                      defaultValue={editingGroup?.name || ''}
+                      name="title"
+                      defaultValue={editingGroup?.title || ''}
                       placeholder="e.g. AI Explorers"
                       required
                       className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 outline-none transition-all font-medium"
                     />
                   </div>
                   <div className="space-y-2">
-                    <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest pl-1">Mock Member Count</label>
+                    <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest pl-1">Member Count (Overwrites Array)</label>
                     <input 
-                      name="members"
+                      name="membersCount"
                       type="number"
-                      defaultValue={editingGroup?.members || 0}
+                      defaultValue={editingGroup?.members?.length || 0}
                       className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 outline-none transition-all font-medium"
                     />
                   </div>
@@ -2175,7 +2290,7 @@ export default function AdminDashboard({ onBack, onVisitProfile, brandingProps, 
                     <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest pl-1">Privacy</label>
                     <select 
                       name="privacy"
-                      defaultValue={editingGroup?.privacy || 'PUBLIC'}
+                      defaultValue={editingGroup?.isPrivate ? 'PRIVATE' : 'PUBLIC'}
                       className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 outline-none transition-all font-medium appearance-none"
                     >
                       <option value="PUBLIC">PUBLIC</option>

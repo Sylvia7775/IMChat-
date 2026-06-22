@@ -67,11 +67,11 @@ type Conversation = {
 };
 
 const TOOLS = [
-  { id: 'summarize', label: 'Resumir', icon: AlignLeft, prompt: 'Por favor, resume el siguiente texto de forma concisa: ' },
-  { id: 'sentiment', label: 'Sentimiento', icon: SmilePlus, prompt: 'Analiza el sentimiento de este texto (Positivo/Negativo/Neutral) y explica por qué: ' },
-  { id: 'translate', label: 'Traducir', icon: LanguagesIcon, prompt: 'Traduce esto al inglés: ' },
-  { id: 'image', label: 'Generar Imagen', icon: ImageIcon, prompt: 'Genera una imagen de: ' },
-  { id: 'video', label: 'Generar Video', icon: Video, prompt: 'Genera un video de: ' },
+  { id: 'summarize', label: 'Summarize', icon: AlignLeft, prompt: 'Please summarize the following text concisely: ' },
+  { id: 'sentiment', label: 'Sentiment', icon: SmilePlus, prompt: 'Analyze the sentiment of this text (Positive/Negative/Neutral) and explain why: ' },
+  { id: 'translate', label: 'Translate', icon: LanguagesIcon, prompt: 'Translate this text into English: ' },
+  { id: 'image', label: 'Generate Image', icon: ImageIcon, prompt: 'Generate an image of: ' },
+  { id: 'video', label: 'Generate Video', icon: Video, prompt: 'Generate a video of: ' },
 ];
 
 export default function AIAssistantSystem({ onBack }: { onBack?: () => void }) {
@@ -115,7 +115,7 @@ export default function AIAssistantSystem({ onBack }: { onBack?: () => void }) {
       setMessages([{
         id: 'greeting',
         role: 'assistant',
-        content: '¡Hola! Soy tu Asistente de IA. ¿En qué puedo ayudarte hoy? Puedes escribir un mensaje o seleccionar una de las herramientas de abajo para comenzar.',
+        content: 'Hello! I am your AI Assistant. How can I help you today? You can write a message or select one of the tools below to start.',
         timestamp: Date.now()
       }]);
       return;

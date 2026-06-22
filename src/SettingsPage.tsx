@@ -189,21 +189,37 @@ export default function SettingsPage({ onClose, onSave, initialData, isNewUser, 
     const localUrl = URL.createObjectURL(file);
     setAvatar(localUrl);
 
-    (() => {
-      try {
-        setIsUploadingAvatar(true);
-        uploadToCloudinary(file, 'image').then(res => {
-          if (res && res.secure_url) {
-            setAvatar(res.secure_url);
-          }
-        }).catch(err => console.error("Upload failure:", err));
-      } finally {
-        setIsUploadingAvatar(false);
+    try {
+      setIsUploadingAvatar(true);
+      const isVideo = file.name.toLowerCase().endsWith('.mp4') || file.type.startsWith('video/');
+      const res = await uploadToCloudinary(file, isVideo ? 'video' : 'image');
+      if (res && res.secure_url) {
+        setAvatar(res.secure_url);
       }
-    })();
+    } catch (err) {
+      console.error("Upload failure:", err);
+    } finally {
+      setIsUploadingAvatar(false);
+    }
   };
 
   const handleSave = async () => {
+    if (username.toLowerCase().includes('imchat')) {
+      alert("Validation Error: Usernames cannot contain the blacklisted word 'imchat'. Please choose a different username.");
+      return;
+    }
+
+    // Check if user is not admin and tries to rename/set names with admin terms
+    const notAdmin = initialData?.role !== 'admin' && userRole !== 'admin';
+    const forbiddenWords = ['admin', 'administrator', 'moderator', 'support', 'system', 'staff', 'owner', 'vip', 'member', 'team member'];
+    const combinedText = `${name} ${surname} ${username}`.toLowerCase();
+    const containsForbidden = forbiddenWords.some(word => combinedText.includes(word));
+    
+    if (notAdmin && containsForbidden) {
+      alert("Validation Error: Display names or usernames cannot contain titles like 'Admin', 'Moderator', 'VIP', 'Member', or official system team prefixes.");
+      return;
+    }
+
     if (onSave) {
       setIsSaving(true);
       try {
@@ -314,6 +330,11 @@ export default function SettingsPage({ onClose, onSave, initialData, isNewUser, 
     e.preventDefault();
     if (!secName || !secUsername) {
       alert("Please enter a name and a username.");
+      return;
+    }
+
+    if (secUsername.toLowerCase().includes('imchat')) {
+      alert("Validation Error: Usernames cannot contain the blacklisted word 'imchat'. Please choose a different username.");
       return;
     }
 
@@ -490,7 +511,11 @@ export default function SettingsPage({ onClose, onSave, initialData, isNewUser, 
                 <div className="relative">
                   <div className="w-[84px] h-[84px] rounded-full overflow-hidden border-2 border-white shadow-md relative bg-gray-100 flex items-center justify-center">
                     {avatar ? (
-                      <img src={avatar} alt="Profile" className="w-full h-full object-cover" />
+                      avatar.toLowerCase().endsWith('.mp4') || avatar.includes('.mp4?') || avatar.toLowerCase().includes('video/mp4') || avatar.startsWith('data:video/mp4') ? (
+                        <video src={avatar} autoPlay loop muted playsInline className="w-full h-full object-cover" />
+                      ) : (
+                        <img src={avatar} alt="Profile" className="w-full h-full object-cover" />
+                      )
                     ) : (
                       <User className="w-10 h-10 text-gray-400" />
                     )}
@@ -504,7 +529,7 @@ export default function SettingsPage({ onClose, onSave, initialData, isNewUser, 
                   <input 
                     id="avatar-input"
                     type="file" 
-                    accept="image/*"
+                    accept="image/jpeg,image/png,image/gif,image/svg+xml,video/mp4,.svg,.sgv,.jpg,.jpeg,.png,.gif,.mp4"
                     className="hidden"
                     onChange={handleAvatarChange}
                   />
@@ -598,25 +623,7 @@ export default function SettingsPage({ onClose, onSave, initialData, isNewUser, 
                   />
                 </div>
 
-                {/* User Role Selection */}
-                <div className="space-y-1">
-                  <label className="text-[10px] font-bold text-gray-400 uppercase flex items-center gap-1">
-                    <ShieldCheck className="w-3.5 h-3.5 text-indigo-500" />
-                    User Profile Role
-                  </label>
-                  <select
-                    value={role}
-                    onChange={(e) => setRole(e.target.value)}
-                    className="w-full bg-gray-50 text-gray-900 rounded-lg p-2.5 text-sm outline-none border border-transparent focus:border-blue-500 font-bold"
-                  >
-                    <option value="user">Standard User (Member)</option>
-                    <option value="admin">Administrator (Full Access)</option>
-                    <option value="moderator">Moderator (Sponsor/Safety)</option>
-                    <option value="team">Team Member</option>
-                    <option value="vip">👑 VIP Gold Member</option>
-                    <option value="restricted">Restricted Profile</option>
-                  </select>
-                </div>
+
 
                 {/* Bio text */}
                 <div className="space-y-1">

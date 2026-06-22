@@ -23,6 +23,21 @@ export type Comment = {
   timestamp: number;
 };
 
+function cleanUndefined(obj: any): any {
+  if (Array.isArray(obj)) {
+    return obj.map(cleanUndefined);
+  } else if (obj !== null && typeof obj === 'object') {
+    return Object.keys(obj).reduce((acc: any, key) => {
+      const val = obj[key];
+      if (val !== undefined) {
+        acc[key] = cleanUndefined(val);
+      }
+      return acc;
+    }, {});
+  }
+  return obj;
+}
+
 export type Post = {
   id: string;
   authorId: string;
@@ -302,14 +317,6 @@ class ChannelStorageSystem {
           }
         });
         
-        const badChannels = ['ch_imchat_announcements', 'ch_design_cafe'];
-        fetched.forEach(c => {
-          if (badChannels.includes(c.id) || c.name === 'YouTube Create your play list with your favourite songs' || c.name.includes('YouTube Create your play')) {
-            deleteDoc(doc(db, 'channels', c.id)).catch(e => console.warn(e));
-          }
-        });
-        merged = merged.filter(c => !badChannels.includes(c.id) && c.name !== 'YouTube Create your play list with your favourite songs' && !c.name.includes('YouTube Create your play'));
-
         this.channels = merged;
       }
       this.notify();
@@ -337,12 +344,13 @@ class ChannelStorageSystem {
 
   async addChannel(channel: Omit<Channel, 'id' | 'subscribers' | 'posts'>) {
     try {
-      const docRef = await addDoc(collection(db, 'channels'), {
+      const payload = cleanUndefined({
         ...channel,
         subscribers: [],
         posts: [],
         createdAt: serverTimestamp()
       });
+      const docRef = await addDoc(collection(db, 'channels'), payload);
       return docRef.id;
     } catch (err) {
       handleFirestoreError(err, OperationType.CREATE, 'channels');
@@ -352,7 +360,8 @@ class ChannelStorageSystem {
 
   async updateChannel(id: string, updates: Partial<Channel>) {
     try {
-      await updateDoc(doc(db, 'channels', id), updates);
+      const cleaned = cleanUndefined(updates);
+      await updateDoc(doc(db, 'channels', id), cleaned);
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `channels/${id}`);
     }
@@ -371,6 +380,21 @@ class ChannelStorageSystem {
     if (!channel) return;
 
     const isSubscribed = channel.subscribers.includes(userId);
+    
+    // Optimistic local update
+    this.channels = this.channels.map(c => {
+      if (c.id === channelId) {
+        return {
+          ...c,
+          subscribers: isSubscribed 
+            ? c.subscribers.filter(id => id !== userId)
+            : [...c.subscribers, userId]
+        };
+      }
+      return c;
+    });
+    this.notify();
+
     const channelRef = doc(db, 'channels', channelId);
 
     try {
@@ -378,6 +402,19 @@ class ChannelStorageSystem {
         subscribers: isSubscribed ? arrayRemove(userId) : arrayUnion(userId)
       });
     } catch (err) {
+      // Revert optimistic update on failure
+      this.channels = this.channels.map(c => {
+        if (c.id === channelId) {
+          return {
+            ...c,
+            subscribers: isSubscribed 
+              ? [...c.subscribers, userId]
+              : c.subscribers.filter(id => id !== userId)
+          };
+        }
+        return c;
+      });
+      this.notify();
       handleFirestoreError(err, OperationType.UPDATE, `channels/${channelId}`);
     }
   }
@@ -396,13 +433,14 @@ class ChannelStorageSystem {
     const channel = this.channels.find(c => c.id === channelId);
     if (!channel) return;
 
-    const newPost: Post = {
+    const rawPost: Post = {
       ...post,
       id: "post_" + Date.now(),
       timestamp: Date.now(),
       comments: [],
       likes: 0
     };
+    const newPost = cleanUndefined(rawPost);
 
     try {
       await updateDoc(doc(db, 'channels', channelId), {

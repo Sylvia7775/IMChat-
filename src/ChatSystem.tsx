@@ -119,9 +119,10 @@ interface ChatSystemProps {
   onUpdateAvatar?: (url: string) => void;
   currentUserId: string;
   currentUserName: string;
+  isFrozen?: boolean;
 }
 
-export default function ChatSystem({ onVisitProfile, onUpdateAvatar, currentUserId, currentUserName }: ChatSystemProps) {
+export default function ChatSystem({ onVisitProfile, onUpdateAvatar, currentUserId, currentUserName, isFrozen }: ChatSystemProps) {
   const [chats, setChats] = useState<Chat[]>(() => {
     try {
       const cached = localStorage.getItem('imchat_local_conversations');
@@ -186,6 +187,12 @@ export default function ChatSystem({ onVisitProfile, onUpdateAvatar, currentUser
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
   const [users, setUsers] = useState<{id: string, name: string, isVerified?: boolean, email?: string, avatar?: string, hideAvatarPublicly?: boolean}[]>([]);
   
+  const getUserName = (userId: string): string => {
+    if (userId === currentUserId) return currentUserName || 'You';
+    const u = users.find(user => user.id === userId);
+    return u ? u.name : 'Unknown User';
+  };
+  
   // State 
   const [mediaPopup, setMediaPopup] = useState<MediaAttachment | null>(null);
   const [messageInput, setMessageInput] = useState('');
@@ -207,6 +214,7 @@ export default function ChatSystem({ onVisitProfile, onUpdateAvatar, currentUser
   // Modals & Panels
   const [activeMsgOptions, setActiveMsgOptions] = useState<string | null>(null);
   const [activeHoverMsg, setActiveHoverMsg] = useState<string | null>(null);
+  const [reactPickerMsgId, setReactPickerMsgId] = useState<string | null>(null);
   const [showStickers, setShowStickers] = useState(false);
   const [stickerTab, setStickerTab] = useState<'gifs' | 'stickers'>('stickers');
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
@@ -314,6 +322,10 @@ export default function ChatSystem({ onVisitProfile, onUpdateAvatar, currentUser
   }, [activeCall?.status]);
 
   const initiateCall = async (type: 'audio' | 'video') => {
+    if (isFrozen) {
+      alert("Your account is frozen. Initiating calls is temporarily restricted.");
+      return;
+    }
     if (!activeChat) return;
 
     setActiveCall({ type, status: 'ringing', time: 0 });
@@ -457,6 +469,10 @@ export default function ChatSystem({ onVisitProfile, onUpdateAvatar, currentUser
   };
 
   const handleSendMessage = async () => {
+    if (isFrozen) {
+      alert("Your account is frozen. Sending messages is temporarily restricted.");
+      return;
+    }
     if (!acceptedPolicy) {
       setShowPolicyModal(true);
       return;
@@ -623,6 +639,28 @@ export default function ChatSystem({ onVisitProfile, onUpdateAvatar, currentUser
     setTranslations(prev => ({ ...prev, [msgId]: translated }));
     setIsTranslating(null);
     setActiveMsgOptions(null);
+  };
+
+  const handleChatPaste = async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      if (item.type.startsWith('image/')) {
+        const file = item.getAsFile();
+        if (file) {
+          e.preventDefault();
+          const url = URL.createObjectURL(file);
+          setStagedMedia({ 
+            file, 
+            url, 
+            name: `staged_paste_${Date.now()}.png`, 
+            type: 'image' 
+          });
+          break;
+        }
+      }
+    }
   };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1168,16 +1206,31 @@ export default function ChatSystem({ onVisitProfile, onUpdateAvatar, currentUser
                  key={msg.id} 
                  className={`flex ${isMe ? 'justify-end' : 'justify-start'} group relative`}
                  onMouseEnter={() => setActiveHoverMsg(msg.id)}
-                 onMouseLeave={() => { setActiveHoverMsg(null); setActiveMsgOptions(null); }}
+                 onMouseLeave={() => { 
+                   if (reactPickerMsgId !== msg.id) {
+                     setActiveHoverMsg(null); 
+                     setActiveMsgOptions(null); 
+                   }
+                 }}
               >
                 {/* Facebook style hover reactions & options */}
                 <AnimatePresence>
                   {activeHoverMsg === msg.id && !isSticker && (
-                    <motion.div initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 5 }} className={`absolute -top-10 ${isMe ? 'right-0' : 'left-0'} bg-white shadow-lg rounded-full px-2 py-1 flex gap-1 z-30 border border-gray-100`}>
+                    <motion.div initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 5 }} className={`absolute -top-10 ${isMe ? 'right-0' : 'left-0'} bg-white shadow-lg rounded-full px-2 py-1 flex gap-1 items-center z-30 border border-gray-100`}>
                       {['👍', '❤️', '😂', '😮', '😢'].map(emoji => (
-                        <button key={emoji} onClick={() => handleAddReaction(msg.id, emoji)} className="hover:scale-125 transition-transform p-1 text-lg leading-none">{emoji}</button>
+                        <button key={emoji} onClick={() => { handleAddReaction(msg.id, emoji); setReactPickerMsgId(null); }} className="hover:scale-130 active:scale-95 transition-transform p-1 text-lg leading-none cursor-pointer">{emoji}</button>
                       ))}
-                      <div className="w-px bg-gray-200 mx-1 my-1"></div>
+                      
+                      {/* Plus reaction icon to show picker */}
+                      <button 
+                        onClick={() => setReactPickerMsgId(reactPickerMsgId === msg.id ? null : msg.id)}
+                        className={`hover:scale-125 transition-all p-1 text-gray-500 hover:text-brand-blue rounded-full ${reactPickerMsgId === msg.id ? 'text-brand-blue bg-blue-50 scale-110' : ''}`}
+                        title="More reactions"
+                      >
+                        <Smile className="w-[18px] h-[18px]" />
+                      </button>
+
+                      <div className="w-px bg-gray-200 mx-1 my-1 self-stretch"></div>
                       <button onClick={() => setReplyingToMsgId(msg.id)} className="p-1.5 text-gray-400 hover:text-brand-blue transition-colors" title="Reply"><Reply className="w-4 h-4" /></button>
                       <button 
                         onClick={() => setForwardingMsg(msg)} 
@@ -1196,6 +1249,31 @@ export default function ChatSystem({ onVisitProfile, onUpdateAvatar, currentUser
                         </button>
                       )}
                       {isMe && <button onClick={() => setActiveMsgOptions(activeMsgOptions === msg.id ? null : msg.id)} className="p-1.5 text-gray-400 hover:text-brand-blue"><MoreVertical className="w-4 h-4" /></button>}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
+                {/* Grid of extra emojis popover */}
+                <AnimatePresence>
+                  {reactPickerMsgId === msg.id && activeHoverMsg === msg.id && (
+                    <motion.div 
+                      initial={{ scale: 0.9, opacity: 0, y: 10 }}
+                      animate={{ scale: 1, opacity: 1, y: 0 }}
+                      exit={{ scale: 0.9, opacity: 0, y: 10 }}
+                      className={`absolute -top-[140px] ${isMe ? 'right-0' : 'left-0'} bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-800 shadow-2xl rounded-2xl p-2.5 z-40 w-[210px] grid grid-cols-6 gap-2`}
+                    >
+                      {['🔥', '👏', '🎉', '💡', '💯', '🚀', '👀', '✨', '🤩', '🎯', '🙏', '💔', '💩', '🥳', '🤔', '👑', '🌈', '⚡️'].map(emoji => (
+                        <button 
+                          key={emoji} 
+                          onClick={() => {
+                            handleAddReaction(msg.id, emoji);
+                            setReactPickerMsgId(null);
+                          }} 
+                          className="hover:scale-130 active:scale-95 transition-transform text-xl p-1 rounded-lg hover:bg-gray-100 dark:hover:bg-neutral-800 leading-none cursor-pointer"
+                        >
+                          {emoji}
+                        </button>
+                      ))}
                     </motion.div>
                   )}
                 </AnimatePresence>
@@ -1338,9 +1416,22 @@ export default function ChatSystem({ onVisitProfile, onUpdateAvatar, currentUser
 
                   {/* Reactions rendering */}
                   {msg.reactions && Object.keys(msg.reactions).length > 0 && !isSticker && (
-                    <div className="absolute -bottom-3 left-2 bg-white shadow-sm border border-gray-100 rounded-full px-1.5 py-0.5 flex gap-1 items-center z-10 text-[11px]">
-                      {Object.entries(msg.reactions).map(([r, users]) => (
-                        <span key={r} onClick={() => handleAddReaction(msg.id, r)} className="cursor-pointer">{r} <span className="text-gray-400 ml-0.5">{(users as string[]).length > 1 ? (users as string[]).length : ''}</span></span>
+                    <div className="absolute -bottom-3 left-2 bg-white dark:bg-neutral-850 shadow-sm border border-gray-100 dark:border-neutral-800 rounded-full px-1.5 py-0.5 flex gap-1 items-center z-10 text-[11px]">
+                      {Object.entries(msg.reactions).map(([r, reactorIds]) => (
+                        <span 
+                          key={r} 
+                          onClick={() => handleAddReaction(msg.id, r)} 
+                          className="cursor-pointer relative group px-1 py-0.5 rounded hover:bg-gray-100 dark:hover:bg-neutral-800 transition-colors inline-flex items-center"
+                        >
+                          {r} <span className="text-gray-400 dark:text-gray-500 ml-0.5">{(reactorIds as string[]).length > 1 ? (reactorIds as string[]).length : ''}</span>
+                          
+                          {/* Rich Tooltip showing who reacted */}
+                          <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 bg-neutral-900/95 backdrop-blur-sm text-white text-[10px] font-semibold px-2.5 py-1.5 rounded-lg shadow-xl opacity-0 scale-90 group-hover:opacity-100 group-hover:scale-100 transition-all duration-200 pointer-events-none z-50 whitespace-nowrap flex flex-col items-center">
+                            <span>{(reactorIds as string[]).map(id => getUserName(id)).join(', ')}</span>
+                            {/* Little down selector triangle indicator */}
+                            <div className="absolute top-full left-1/2 -translate-x-1/2 border-spacing-1 border-4 border-transparent border-t-neutral-900/95"></div>
+                          </div>
+                        </span>
                       ))}
                     </div>
                   )}
@@ -1443,52 +1534,59 @@ export default function ChatSystem({ onVisitProfile, onUpdateAvatar, currentUser
                )}
             </AnimatePresence>
 
-            <div className="flex items-end gap-1.5 px-1 relative z-20">
-              <button title="Emojis" onClick={() => { setShowEmojiPicker(!showEmojiPicker); setShowStickers(false); }} className="p-2.5 text-yellow-500 hover:bg-gray-200 rounded-full transition-colors active:scale-95 shrink-0"><Smile className="w-[26px] h-[26px]" /></button>
-              <button title="Stickers & GIF" onClick={() => { setShowStickers(!showStickers); setShowEmojiPicker(false); }} className="p-2.5 text-gray-500 hover:bg-gray-200 rounded-full transition-colors active:scale-95 shrink-0"><GiphyIcon className="w-[28px] h-[28px]" /></button>
-              <button title="Attach Media" onClick={() => fileInputRef.current?.click()} className="p-2.5 text-gray-500 hover:bg-gray-200 rounded-full transition-colors active:scale-95 shrink-0"><Paperclip className="w-[22px] h-[22px]" /></button>
-              <button title="Camera / Direct Upload" onClick={() => cameraInputRef.current?.click()} className="p-2.5 text-gray-500 hover:bg-gray-200 rounded-full transition-colors active:scale-95 shrink-0"><Camera className="w-[24px] h-[24px]" /></button>
-              
-              <div className="flex-1 bg-white rounded-2xl px-4 py-2 border border-gray-200 shadow-sm flex items-center my-1 relative">
-                {isRecording ? (
-                  <div className="w-full flex items-center gap-3 py-1 flex-1">
-                    <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></div>
-                    <span className="text-red-500 font-medium text-[15px] flex-1">{formatSec(recordingTime)}</span>
-                    <button onClick={stopRecording} className="text-red-500 hover:bg-red-50 p-1.5 rounded-full"><Square className="w-5 h-5 fill-current" /></button>
-                  </div>
+            {isFrozen ? (
+              <div className="flex items-center justify-center p-4 bg-amber-50 border border-amber-200 text-amber-700 text-xs font-bold rounded-2xl mx-4 my-2 text-center shadow-sm">
+                ❄️ This account is frozen. Sending messages is temporarily restricted, but you can continue browsing.
+              </div>
+            ) : (
+              <div className="flex items-end gap-1.5 px-1 relative z-20">
+                <button title="Emojis" onClick={() => { setShowEmojiPicker(!showEmojiPicker); setShowStickers(false); }} className="p-2.5 text-yellow-500 hover:bg-gray-200 rounded-full transition-colors active:scale-95 shrink-0"><Smile className="w-[26px] h-[26px]" /></button>
+                <button title="Stickers & GIF" onClick={() => { setShowStickers(!showStickers); setShowEmojiPicker(false); }} className="p-2.5 text-gray-500 hover:bg-gray-200 rounded-full transition-colors active:scale-95 shrink-0"><GiphyIcon className="w-[28px] h-[28px]" /></button>
+                <button title="Attach Media" onClick={() => fileInputRef.current?.click()} className="p-2.5 text-gray-500 hover:bg-gray-200 rounded-full transition-colors active:scale-95 shrink-0"><Paperclip className="w-[22px] h-[22px]" /></button>
+                <button title="Camera / Direct Upload" onClick={() => cameraInputRef.current?.click()} className="p-2.5 text-gray-500 hover:bg-gray-200 rounded-full transition-colors active:scale-95 shrink-0"><Camera className="w-[24px] h-[24px]" /></button>
+                
+                <div className="flex-1 bg-white rounded-2xl px-4 py-2 border border-gray-200 shadow-sm flex items-center my-1 relative">
+                  {isRecording ? (
+                    <div className="w-full flex items-center gap-3 py-1 flex-1">
+                      <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></div>
+                      <span className="text-red-500 font-medium text-[15px] flex-1">{formatSec(recordingTime)}</span>
+                      <button onClick={stopRecording} className="text-red-500 hover:bg-red-50 p-1.5 rounded-full"><Square className="w-5 h-5 fill-current" /></button>
+                    </div>
+                  ) : (
+                    <textarea 
+                      value={messageInput}
+                      onChange={(e) => setMessageInput(e.target.value)}
+                      onPaste={handleChatPaste}
+                      placeholder={editingMsgId ? "Edit message..." : "Message"}
+                      className="w-full bg-transparent outline-none resize-none max-h-[120px] py-1 text-[15px]"
+                      rows={1}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendMessage(); }
+                      }}
+                    />
+                  )}
+                </div>
+                
+                {!isRecording && (!messageInput.trim() && !stagedMedia) && !editingMsgId ? (
+                  <button 
+                    onClick={startRecording}
+                    className="p-3 my-1 bg-brand-blue text-white rounded-full shrink-0 transition-transform active:scale-95 shadow-md flex items-center justify-center hover:bg-blue-600"
+                  >
+                    <Mic className="w-6 h-6" />
+                  </button>
                 ) : (
-                  <textarea 
-                    value={messageInput}
-                    onChange={(e) => setMessageInput(e.target.value)}
-                    placeholder={editingMsgId ? "Edit message..." : "Message"}
-                    className="w-full bg-transparent outline-none resize-none max-h-[120px] py-1 text-[15px]"
-                    rows={1}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendMessage(); }
-                    }}
-                  />
+                  !isRecording && (
+                    <button 
+                      onClick={handleSendMessage}
+                      disabled={!messageInput.trim() && !stagedMedia}
+                      className={`p-3 my-1 rounded-full shrink-0 transition-all active:scale-95 ${messageInput.trim() || stagedMedia ? 'bg-brand-blue text-white shadow-md hover:bg-blue-600' : 'bg-transparent text-gray-400'}`}
+                    >
+                      {editingMsgId ? <Check className="w-6 h-6" /> : <Send className="w-6 h-6 ml-0.5" />}
+                    </button>
+                  )
                 )}
               </div>
-              
-              {!isRecording && (!messageInput.trim() && !stagedMedia) && !editingMsgId ? (
-                <button 
-                  onClick={startRecording}
-                  className="p-3 my-1 bg-brand-blue text-white rounded-full shrink-0 transition-transform active:scale-95 shadow-md flex items-center justify-center hover:bg-blue-600"
-                >
-                  <Mic className="w-6 h-6" />
-                </button>
-              ) : (
-                !isRecording && (
-                  <button 
-                    onClick={handleSendMessage}
-                    disabled={!messageInput.trim() && !stagedMedia}
-                    className={`p-3 my-1 rounded-full shrink-0 transition-all active:scale-95 ${messageInput.trim() || stagedMedia ? 'bg-brand-blue text-white shadow-md hover:bg-blue-600' : 'bg-transparent text-gray-400'}`}
-                  >
-                    {editingMsgId ? <Check className="w-6 h-6" /> : <Send className="w-6 h-6 ml-0.5" />}
-                  </button>
-                )
-              )}
-            </div>
+            )}
           </div>
         )}
       </motion.div>

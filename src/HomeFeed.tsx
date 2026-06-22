@@ -3,14 +3,14 @@ import EmojiPicker, { EmojiClickData, Theme } from 'emoji-picker-react';
 import { 
   Heart, MessageCircle, Send, Bookmark, MoreHorizontal, 
   Image as ImageIcon, Video, Smile, Download, Flag, 
-  Share2, X, MoreVertical, Edit2, Trash2, Reply, Wand2, Users, MapPin, Tag, Globe, ChevronDown, UserPlus, Hash, Search, Star, BadgeCheck, RefreshCw, PlaySquare, Loader2,
+  Share2, X, MoreVertical, Edit2, Trash2, Reply, Wand2, Users, MapPin, Tag, Globe, ChevronDown, UserPlus, Hash, Search, Star, BadgeCheck, RefreshCw, PlaySquare, Loader2, Link2,
   Mic, MicOff, Square, Play, Pause, Volume2, Clock, Sparkles, Radio, Calendar
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { PostStore, Post, PostComment } from './lib/PostStore';
 import { EventStore } from './lib/EventStore';
 import { auth, db } from './firebase';
-import { collection, getDocs } from 'firebase/firestore';
+import { collection, getDocs, doc, setDoc } from 'firebase/firestore';
 import UserAvatar from './components/UserAvatar';
 import AudioPlayerPost from './components/AudioPlayerPost';
 import GiphyIcon from './components/GiphyIcon';
@@ -172,14 +172,16 @@ export default function HomeFeed({
   searchQuery = '', 
   profileImg = 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&q=80&w=300&h=300',
   userSettings,
-  userRole = 'user'
+  userRole = 'user',
+  onUpdateAvatar
 }: { 
   onNavigate?: (nav: string) => void, 
   onUserSelected?: (user: any) => void,
   searchQuery?: string,
   profileImg?: string,
   userSettings?: any,
-  userRole?: string
+  userRole?: string,
+  onUpdateAvatar?: (url: string) => Promise<void> | void
 }) {
   const currentUserId = auth.currentUser?.uid || 'anonymous';
   const currentUserName = userSettings?.name || 'User';
@@ -345,6 +347,8 @@ export default function HomeFeed({
   const [composeFile, setComposeFile] = useState<File | null>(null);
   const [composeMediaType, setComposeMediaType] = useState<'image' | 'video'>('image');
   const [composeVisibility, setComposeVisibility] = useState<'public' | 'private' | 'friends'>('public');
+  const [showComposeUrlInput, setShowComposeUrlInput] = useState(false);
+  const [composeUrlText, setComposeUrlText] = useState('');
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [instantUploadStatus, setInstantUploadStatus] = useState<string | null>(null);
@@ -549,6 +553,73 @@ export default function HomeFeed({
     }
   };
 
+  const handlePostPaste = async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      if (item.type.startsWith('image/')) {
+        const file = item.getAsFile();
+        if (file) {
+          e.preventDefault();
+          const localUrl = URL.createObjectURL(file);
+          setComposeMediaType('image');
+          setComposeMediaUrl(localUrl);
+          setComposeFile(file);
+          setRemoteMediaUrl(null);
+
+          if (isOffline) {
+            setInstantUploadStatus('Saved locally (Offline mode)');
+          } else {
+            setInstantUploadStatus('Uploading pasted image...');
+            try {
+              const result = await uploadToCloudinary(file, 'image');
+              if (result && result.secure_url) {
+                setRemoteMediaUrl(result.secure_url);
+                setInstantUploadStatus('Upload complete!');
+              } else {
+                setInstantUploadStatus('Upload failed');
+              }
+            } catch (err) {
+              console.error("Background paste upload failed:", err);
+              setInstantUploadStatus('Upload failed');
+            }
+          }
+          break;
+        }
+      }
+    }
+  };
+
+  const handleEditPaste = async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      if (item.type.startsWith('image/')) {
+        const file = item.getAsFile();
+        if (file) {
+          e.preventDefault();
+          const localUrl = URL.createObjectURL(file);
+          setEditMediaType('image');
+          setEditMediaUrl(localUrl);
+          setEditFile(file);
+          if (!isOffline) {
+            try {
+              const result = await uploadToCloudinary(file, 'image');
+              if (result && result.secure_url) {
+                setEditMediaUrl(result.secure_url);
+              }
+            } catch (err) {
+              console.error("Edit paste upload failed:", err);
+            }
+          }
+          break;
+        }
+      }
+    }
+  };
+
   const handlePost = async () => {
     if (!newPostContent.trim() && !composeMediaUrl && !youtubePreviewId) return;
     
@@ -586,6 +657,8 @@ export default function HomeFeed({
     setRemoteMediaUrl(null);
     setInstantUploadStatus(null);
     setComposeVisibility('public');
+    setComposeUrlText('');
+    setShowComposeUrlInput(false);
 
     try {
       if (isOffline) {
@@ -634,7 +707,7 @@ export default function HomeFeed({
                sizeBytes: fileToSave.size,
                userId: currentUserId,
                fileObj: fileToSave,
-               source: 'imchat_public_post'
+               source: 'upload'
              });
           } catch (e) {
              console.warn("Could not add feed media to personal storage", e);
@@ -944,7 +1017,7 @@ export default function HomeFeed({
            {/* Original Post context chunk */}
            <div className="flex gap-3 border-b border-gray-50 pb-4">
                <UserAvatar 
-                 src={post.user.avatar} 
+                 src={post.userId === currentUserId ? MY_AVATAR : post.user.avatar} 
                  name={post.user.name}
                  size="md"
                  className="shrink-0 cursor-pointer hover:opacity-80 transition-opacity"
@@ -1031,7 +1104,7 @@ export default function HomeFeed({
                      <span className="absolute left-0 top-3.5 w-3.5 h-0.5 bg-slate-100" />
                    )}
                    <UserAvatar 
-                     src={c.avatar} 
+                     src={c.authorId === currentUserId ? MY_AVATAR : c.avatar} 
                      name={c.authorName}
                      size={isReply ? "xs" : "sm"}
                      className="shrink-0 cursor-pointer hover:opacity-80 transition-opacity"
@@ -1346,14 +1419,6 @@ export default function HomeFeed({
   };
 
   const filteredPosts = posts.filter(p => {
-    // Visibility check
-    if (p.visibility === 'private' && p.userId !== currentUserId) return false;
-    if (p.visibility === 'friends') {
-      const isCreator = p.userId === currentUserId;
-      const isAllowed = p.allowedUserIds && p.allowedUserIds.includes(currentUserId);
-      if (!isCreator && !isAllowed) return false;
-    }
-    
     const q = searchQuery.toLowerCase().trim();
     if (!q) return true;
     
@@ -1397,7 +1462,7 @@ export default function HomeFeed({
               onClick={() => setIsComposing(true)}
               className="flex-1 bg-gray-100 hover:bg-gray-200 transition-colors rounded-full px-4 py-2.5 cursor-pointer text-gray-500 text-[15px]"
             >
-              ¿Qué tienes en mente, {currentUserName}?
+              What's on your mind, {currentUserName}?
             </div>
           </div>
           <div className="border-t border-gray-200 mt-3 pt-3 flex items-center justify-between sm:justify-around px-1">
@@ -1485,9 +1550,74 @@ export default function HomeFeed({
                     autoFocus
                     value={newPostContent}
                     onChange={(e) => setNewPostContent(e.target.value)}
-                    placeholder={`¿Qué tienes en mente, ${currentUserName}?`}
+                    onPaste={handlePostPaste}
+                    placeholder={`What's on your mind, ${currentUserName}?`}
                     className="w-full text-2xl text-gray-900 placeholder-gray-500 bg-transparent border-none outline-none resize-none min-h-[120px]"
                   />
+
+                  {/* Inline URL Paste Input */}
+                  {showComposeUrlInput && (
+                    <div className="bg-gradient-to-r from-indigo-50 to-purple-50 border border-indigo-100 rounded-2xl p-4 mb-4 flex flex-col gap-2.5 shadow-sm">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-extrabold text-indigo-900 flex items-center gap-1.5">
+                          <Link2 className="w-4 h-4 text-indigo-600" />
+                          Instant Media URL Upload
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setComposeUrlText('');
+                            setComposeMediaUrl(null);
+                          }}
+                          className="text-xs text-indigo-500 hover:text-indigo-700 font-extrabold transition-colors cursor-pointer"
+                        >
+                          Clear
+                        </button>
+                      </div>
+                      <div className="flex flex-col sm:flex-row gap-2">
+                        <input
+                          type="url"
+                          value={composeUrlText}
+                          onChange={(e) => {
+                            const val = e.target.value.trim();
+                            setComposeUrlText(val);
+                            if (val) {
+                              const lower = val.toLowerCase();
+                              const isVideo = lower.endsWith('.mp4') || lower.endsWith('.mov') || lower.endsWith('.webm') || lower.endsWith('.m3u8') || lower.includes('video');
+                              setComposeMediaType(isVideo ? 'video' : 'image');
+                              setComposeMediaUrl(val);
+                              // Reset file upload state
+                              setComposeFile(null);
+                              setRemoteMediaUrl(null);
+                            } else {
+                              setComposeMediaUrl(null);
+                            }
+                          }}
+                          placeholder="Paste a direct photo or video link... (e.g. Unsplash or direct web URL)"
+                          className="flex-1 bg-white border border-gray-200 rounded-xl px-4 py-2.5 text-xs text-gray-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 placeholder-gray-400 font-semibold"
+                        />
+                        <div className="flex gap-1.5 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => setComposeMediaType('image')}
+                            className={`flex-1 sm:flex-initial px-4 py-2 text-xs font-extrabold rounded-xl border transition-all cursor-pointer ${composeMediaType === 'image' ? 'bg-indigo-600 border-indigo-700 text-white shadow-sm' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'}`}
+                          >
+                            Photo
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setComposeMediaType('video')}
+                            className={`flex-1 sm:flex-initial px-4 py-2 text-xs font-extrabold rounded-xl border transition-all cursor-pointer ${composeMediaType === 'video' ? 'bg-indigo-600 border-indigo-700 text-white shadow-sm' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'}`}
+                          >
+                            Video
+                          </button>
+                        </div>
+                      </div>
+                      <p className="text-[10px] text-indigo-500 font-bold leading-normal">
+                        ★ Pasted URLs render instantly! Great way to post high-res media without loading delay.
+                      </p>
+                    </div>
+                  )}
                   
                   {/* Media Preview */}
                   {(composeMediaUrl || youtubePreviewId) && (
@@ -1628,6 +1758,13 @@ export default function HomeFeed({
                       </button>
                       <button onClick={() => { setComposeMediaType('video'); composeFileInputRef.current?.click(); }}><Video className="w-6 h-6 text-red-500 hover:scale-110 transition-transform" /></button>
                       <button onClick={() => { setComposeMediaType('image'); composeFileInputRef.current?.click(); }}><ImageIcon className="w-6 h-6 text-green-500 hover:scale-110 transition-transform" /></button>
+                      <button 
+                        onClick={() => setShowComposeUrlInput(!showComposeUrlInput)} 
+                        title="Upload media via URL fast"
+                        className="active:scale-95 transition-all"
+                      >
+                        <Link2 className={`w-6 h-6 hover:scale-110 transition-transform ${showComposeUrlInput ? 'text-indigo-600' : 'text-indigo-400'}`} />
+                      </button>
                       <UserPlus className="w-6 h-6 text-blue-500 hover:scale-110 transition-transform" />
                       <button onClick={() => setShowComposeEmojiPicker(!showComposeEmojiPicker)}>
                         <GiphyIcon className={`w-6 h-6 hover:scale-110 transition-transform ${showComposeEmojiPicker ? 'opacity-100' : 'opacity-80'}`} />
@@ -1778,7 +1915,7 @@ export default function HomeFeed({
                 >
                   <div className="w-9 h-9 rounded-full bg-gradient-to-tr from-yellow-400 via-pink-500 to-purple-500 p-[2px]">
                     <UserAvatar 
-                      src={post.user.avatar} 
+                      src={post.userId === currentUserId ? MY_AVATAR : post.user.avatar} 
                       name={post.user.name}
                       size="md"
                       className="border-2 border-white"
@@ -1927,16 +2064,7 @@ export default function HomeFeed({
                     </motion.div>
                   </button>
 
-                  {/* Comment Button */}
-                  <button 
-                    onClick={() => setActiveCommentPostId(post.id)} 
-                    className="relative flex items-center justify-center p-1 active:scale-90 hover:scale-105 transition-all duration-200 group"
-                    title="Comentarios"
-                  >
-                    <MessageCircle 
-                      className="w-7 h-7 stroke-[1.75] text-gray-900 group-hover:text-gray-500 transition-colors" 
-                    />
-                  </button>
+                  {/* Comment button removed in accordance with corporate safety update */}
 
                   {/* Share Button / Send Paperplane */}
                   <button 
@@ -2113,19 +2241,7 @@ export default function HomeFeed({
                   </div>
                 )}
                 
-                {post.comments.length > 0 && (
-                  <div className="mt-2 space-y-2">
-                    {post.comments.slice(-2).map(c => (
-                      <div key={c.id} className="text-[13px] flex gap-2 items-start">
-                        <span className="font-bold text-gray-900 shrink-0">{c.authorName}</span>
-                        <span className="text-gray-700 line-clamp-1">{c.text}</span>
-                      </div>
-                    ))}
-                    <button onClick={() => setActiveCommentPostId(post.id)} className="text-gray-500 text-[13px] hover:text-gray-700 text-left block">
-                      View all {post.comments.length} comments
-                    </button>
-                  </div>
-                )}
+                  {/* Comments disabled in compliance with corporate safety update */}
                 
                 <span className="text-[10px] font-medium text-gray-400 mt-1.5 uppercase tracking-wide">{formatTime(post.timestamp)}</span>
               </div>
@@ -2179,8 +2295,9 @@ export default function HomeFeed({
                 <textarea
                   value={editContent}
                   onChange={(e) => setEditContent(e.target.value)}
+                  onPaste={handleEditPaste}
                   className="w-full text-lg outline-none border-none resize-none min-h-[100px]"
-                  placeholder="¿Qué tienes en mente?"
+                  placeholder="What's on your mind?"
                   autoFocus
                 />
 
@@ -2283,6 +2400,41 @@ export default function HomeFeed({
                 
                 return (
                   <div className="flex flex-col text-center divide-y divide-gray-100">
+                    {post.image && (
+                      <button 
+                        type="button"
+                        onClick={async () => {
+                          if (onUpdateAvatar) {
+                            try {
+                              await onUpdateAvatar(post.image);
+                              alert("Profile picture updated successfully! ✨");
+                            } catch (e) {
+                              console.error("Failed to update avatar via prop:", e);
+                              alert("Failed to set profile picture.");
+                            }
+                          } else {
+                            try {
+                              localStorage.setItem('profileImg', post.image);
+                              if (auth.currentUser) {
+                                await setDoc(doc(db, "users", auth.currentUser.uid), { 
+                                  avatar: post.image,
+                                  isSetupComplete: true 
+                                }, { merge: true });
+                              }
+                              alert("Profile picture updated successfully! ✨ Please refresh to apply across cached views.");
+                            } catch (e) {
+                              console.error(e);
+                              alert("Failed to update profile picture.");
+                            }
+                          }
+                          setActivePostOptions(null);
+                        }}
+                        className="w-full py-4 text-sm font-bold text-indigo-600 hover:bg-indigo-50/50 transition-all focus:outline-none flex items-center justify-center gap-2 cursor-pointer"
+                      >
+                        <UserPlus className="w-4.5 h-4.5 text-indigo-500 shrink-0" />
+                        <span>Set as Profile Picture</span>
+                      </button>
+                    )}
                     {(isMyPost || isOwner) && (
                       <button 
                         type="button"

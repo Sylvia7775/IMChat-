@@ -18,6 +18,21 @@ import {
 
 export type GroupRole = 'owner' | 'moderator' | 'member';
 
+function cleanUndefined(obj: any): any {
+  if (Array.isArray(obj)) {
+    return obj.map(cleanUndefined);
+  } else if (obj !== null && typeof obj === 'object') {
+    return Object.keys(obj).reduce((acc: any, key) => {
+      const val = obj[key];
+      if (val !== undefined) {
+        acc[key] = cleanUndefined(val);
+      }
+      return acc;
+    }, {});
+  }
+  return obj;
+}
+
 export type GroupMember = {
   userId: string;
   name: string;
@@ -317,14 +332,6 @@ class GroupStorageSystem {
         }
       });
 
-      const badData = ['im_g_1780686596872', 'im_g_1780678713842', 'im_g_178051675257', '1im_g_1780740331746', 'g_web_developers', 'im_g_1780516752571', 'im_g_1780740331746'];
-      firestoreGroups.forEach(g => {
-        if (badData.includes(g.id) || badData.includes(g.uid)) {
-          deleteDoc(doc(db, 'groups', g.id)).catch(e => console.warn(e));
-        }
-      });
-      merged = merged.filter(g => !badData.includes(g.id) && !badData.includes(g.uid));
-
       this.groups = merged;
       this.notify();
     }, (error) => {
@@ -378,11 +385,12 @@ class GroupStorageSystem {
     }
 
     try {
-      const docRef = await addDoc(collection(db, 'groups'), {
+      const payload = cleanUndefined({
         ...group,
         posts: [],
         createdAt: serverTimestamp()
       });
+      const docRef = await addDoc(collection(db, 'groups'), payload);
       
       if (docRef && docRef.id) {
         // Replace tempId with the official Firestore ID
@@ -413,7 +421,8 @@ class GroupStorageSystem {
 
     // 2. Try Firestore update
     try {
-      await updateDoc(doc(db, 'groups', id), updates);
+      const cleaned = cleanUndefined(updates);
+      await updateDoc(doc(db, 'groups', id), cleaned);
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `groups/${id}`);
     }
@@ -493,7 +502,7 @@ class GroupStorageSystem {
     if (updatedGroup) {
       try {
         await updateDoc(doc(db, 'groups', groupId), {
-          posts: updatedGroup.posts
+          posts: cleanUndefined(updatedGroup.posts)
         });
       } catch (err) {
         console.warn("Firestore votePoll failed:", err);
@@ -503,11 +512,12 @@ class GroupStorageSystem {
   }
 
   async addPost(groupId: string, post: Omit<GroupPost, 'id' | 'timestamp'>) {
-    const newPost: GroupPost = {
+    const rawPost: GroupPost = {
       ...post,
       id: "p_" + Date.now() + "_" + Math.random().toString(36).substring(2, 5),
       timestamp: Date.now()
     };
+    const newPost: GroupPost = cleanUndefined(rawPost);
 
     // Update locally and notify
     this.groups = this.groups.map(g => {
@@ -569,6 +579,9 @@ class GroupStorageSystem {
   }
 
   async leaveGroup(groupId: string, userId: string) {
+    const groupBefore = this.groups.find(g => g.id === groupId) || this.localGroups.find(g => g.id === groupId);
+    const memberToRemove = groupBefore?.members.find(m => m.userId === userId);
+
     this.groups = this.groups.map(g => {
       if (g.id === groupId) {
         return { ...g, members: g.members.filter(m => m.userId !== userId) };
@@ -588,12 +601,10 @@ class GroupStorageSystem {
     } catch (e) {}
     this.notify();
 
-    const group = this.groups.find(g => g.id === groupId);
-    const member = group?.members.find(m => m.userId === userId);
-    if (member) {
+    if (memberToRemove) {
       try {
         await updateDoc(doc(db, 'groups', groupId), {
-          members: arrayRemove(member)
+          members: arrayRemove(memberToRemove)
         });
       } catch (err) {
         handleFirestoreError(err, OperationType.UPDATE, `groups/${groupId}`);

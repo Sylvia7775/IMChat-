@@ -473,7 +473,7 @@ export default function ChannelsSystem({ currentUserId, currentUserName }: Chann
                            onClick={() => setActivePostComments(activePostComments === post.id ? null : post.id)}
                            className="flex items-center gap-1.5 text-gray-500 text-sm font-medium hover:text-brand-blue"
                          >
-                           <MessageCircle className="w-4 h-4" /> {post.comments.length} Comments
+                           <span className="hidden" />
                          </button>
                          <button 
                            onClick={async () => {
@@ -506,7 +506,7 @@ export default function ChannelsSystem({ currentUserId, currentUserName }: Chann
                     </div>
 
                     {/* Comments Section */}
-                    {activePostComments === post.id && (
+                    {false && activePostComments === post.id && (
                       <div className="mt-3 flex flex-col gap-3 bg-gray-50 p-3 rounded-lg">
                         {post.comments.length === 0 ? (
                           <div className="text-xs text-center text-gray-400">No comments yet. Be the first!</div>

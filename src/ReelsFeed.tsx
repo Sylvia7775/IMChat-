@@ -1,9 +1,9 @@
 import { useState, useRef, useEffect } from 'react';
-import { Heart, MessageCircle, Send, MoreVertical, Music, Upload, PlaySquare, BadgeCheck, Layers, Loader2, Sparkles, Smile, Volume2, VolumeX, Check, Sliders, BarChart3, Zap, Activity, TrendingUp, X, Sparkle, Globe, PieChart, HelpCircle, FileText, Plus, Flag, AlertTriangle, Share2 } from 'lucide-react';
+import { Heart, MessageCircle, Send, MoreVertical, Music, Upload, PlaySquare, BadgeCheck, Layers, Loader2, Sparkles, Smile, Volume2, VolumeX, Check, Sliders, BarChart3, Zap, Activity, TrendingUp, X, Sparkle, Globe, PieChart, HelpCircle, FileText, Plus, Flag, AlertTriangle, Share2, Trash2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { ReelStore, Reel as ReelType } from './lib/ReelStore';
 import { auth, db } from './firebase';
-import { doc, updateDoc, addDoc, collection } from 'firebase/firestore';
+import { doc, updateDoc, addDoc, collection, where, query, onSnapshot, deleteDoc } from 'firebase/firestore';
 import { VideoCache } from './lib/VideoCache';
 import UserAvatar from './components/UserAvatar';
 import { AR_FILTERS } from './UploadReel';
@@ -1526,6 +1526,77 @@ interface ReelProps {
   onShareOpen?: (reel: ReelType) => void;
 }
 
+interface ReelReply {
+  id: string;
+  authorId: string;
+  authorName: string;
+  authorAvatar?: string;
+  text: string;
+  timestamp: number;
+  likes: string[];
+}
+
+interface ReelComment {
+  id: string;
+  reelId: string;
+  authorId: string;
+  authorName: string;
+  authorAvatar?: string;
+  text: string;
+  timestamp: number;
+  likes: string[];
+  replies?: ReelReply[];
+}
+
+const SEED_COMMENTS_BY_REEL: Record<string, ReelComment[]> = {
+  'seed-reel-1': [
+    {
+      id: 'c1',
+      reelId: 'seed-reel-1',
+      authorId: 'user1',
+      authorName: 'AlexRiver',
+      authorAvatar: 'https://api.dicebear.com/7.x/adventurer/svg?seed=Alex',
+      text: 'This video is so therapeutic. I am writing code to these sounds right now! 🌲💻',
+      timestamp: Date.now() - 3600000 * 2,
+      likes: ['user2', 'user3'],
+      replies: [
+        {
+          id: 'r1',
+          authorId: 'user2',
+          authorName: 'NatureWalks',
+          authorAvatar: 'https://api.dicebear.com/7.x/adventurer/svg?seed=nature',
+          text: 'Glad you find it helpful Alex! Happy coding! ✨',
+          timestamp: Date.now() - 3600000 * 1.5,
+          likes: ['user1']
+        }
+      ]
+    },
+    {
+      id: 'c2',
+      reelId: 'seed-reel-1',
+      authorId: 'user3',
+      authorName: 'Sophie_Dev',
+      authorAvatar: 'https://api.dicebear.com/7.x/adventurer/svg?seed=Sophie',
+      text: 'Pure peaceful vibes. Love this so much!',
+      timestamp: Date.now() - 3600000 * 4,
+      likes: []
+    }
+  ],
+  'seed-reel-2': [
+    {
+      id: 'c3',
+      reelId: 'seed-reel-2',
+      authorId: 'user1',
+      authorName: 'AlexRiver',
+      authorAvatar: 'https://api.dicebear.com/7.x/adventurer/svg?seed=Alex',
+      text: 'Shibuya at night is on my absolute bucket list! Standard of cyberpunk beauty 🌌⚡',
+      timestamp: Date.now() - 3600000 * 2,
+      likes: ['user3'],
+      replies: []
+    }
+  ]
+};
+
 function Reel({ 
   data, 
   isActive, 
@@ -1553,6 +1624,227 @@ function Reel({
   const [isPlaying, setIsPlaying] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [cachedUrl, setCachedUrl] = useState<string | null>(null);
+
+  const [showComments, setShowComments] = useState(false);
+  const [comments, setComments] = useState<ReelComment[]>([]);
+  const [newCommentText, setNewCommentText] = useState('');
+  const [replyingTo, setReplyingTo] = useState<ReelComment | null>(null);
+
+  // Load comments
+  useEffect(() => {
+    if (!showComments) return;
+
+    // Use Firestore onSnapshot with local fallback
+    const q = query(
+      collection(db, 'reel_comments_new'),
+      where('reelId', '==', data.id)
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const fetchedComments: ReelComment[] = [];
+      snapshot.forEach((doc) => {
+        fetchedComments.push({
+          id: doc.id,
+          ...doc.data()
+        } as ReelComment);
+      });
+      
+      // Sort in-memory by timestamp asc (older at top, newer at bottom)
+      fetchedComments.sort((a, b) => a.timestamp - b.timestamp);
+      
+      if (fetchedComments.length > 0) {
+        setComments(fetchedComments);
+      } else {
+        // Fall back to seed comments if database has none
+        const seeds = SEED_COMMENTS_BY_REEL[data.id] || [];
+        setComments(seeds);
+      }
+    }, (err) => {
+      console.warn("Firestore comments error, using local fallback:", err);
+      const localSaved = localStorage.getItem(`comments_${data.id}`);
+      if (localSaved) {
+        setComments(JSON.parse(localSaved));
+      } else {
+        setComments(SEED_COMMENTS_BY_REEL[data.id] || []);
+      }
+    });
+
+    return () => unsubscribe();
+  }, [showComments, data.id]);
+
+  const handleAddComment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newCommentText.trim()) return;
+
+    const currentUserId = auth.currentUser?.uid || 'anon_user_' + Math.random().toString(36).substr(2, 9);
+    const currentUserName = auth.currentUser?.displayName || 'IMChat User';
+    const currentUserAvatar = auth.currentUser?.photoURL || `https://api.dicebear.com/7.x/adventurer/svg?seed=${currentUserName}`;
+
+    const newComment: Omit<ReelComment, 'id'> = {
+      reelId: data.id,
+      authorId: currentUserId,
+      authorName: currentUserName,
+      authorAvatar: currentUserAvatar,
+      text: newCommentText.trim(),
+      timestamp: Date.now(),
+      likes: [],
+      replies: []
+    };
+
+    try {
+      if (replyingTo) {
+        const updatedReplies = [...(replyingTo.replies || []), {
+          id: 'reply_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4),
+          authorId: currentUserId,
+          authorName: currentUserName,
+          authorAvatar: currentUserAvatar,
+          text: newCommentText.trim(),
+          timestamp: Date.now(),
+          likes: []
+        }];
+
+        await updateDoc(doc(db, 'reel_comments_new', replyingTo.id), {
+          replies: updatedReplies
+        });
+        
+        setReplyingTo(null);
+      } else {
+        await addDoc(collection(db, 'reel_comments_new'), newComment);
+      }
+      setNewCommentText('');
+    } catch (err) {
+      console.warn("Error adding comment, executing local fallback:", err);
+      let updatedComments = [...comments];
+      if (replyingTo) {
+        updatedComments = updatedComments.map(c => {
+          if (c.id === replyingTo.id) {
+            return {
+              ...c,
+              replies: [...(c.replies || []), {
+                id: 'reply_' + Date.now(),
+                authorId: currentUserId,
+                authorName: currentUserName,
+                authorAvatar: currentUserAvatar,
+                text: newCommentText.trim(),
+                timestamp: Date.now(),
+                likes: []
+              }]
+            };
+          }
+          return c;
+        });
+        setReplyingTo(null);
+      } else {
+        const localNewComment: ReelComment = {
+          ...newComment,
+          id: 'comment_' + Date.now(),
+          replies: []
+        };
+        updatedComments = [...updatedComments, localNewComment];
+      }
+
+      setComments(updatedComments);
+      localStorage.setItem(`comments_${data.id}`, JSON.stringify(updatedComments));
+      setNewCommentText('');
+    }
+  };
+
+  const handleDeleteComment = async (commentId: string) => {
+    try {
+      await deleteDoc(doc(db, 'reel_comments_new', commentId));
+    } catch (err) {
+      console.warn("Firestore delete issue, executing local fallback:", err);
+      const updatedComments = comments.filter(c => c.id !== commentId);
+      setComments(updatedComments);
+      localStorage.setItem(`comments_${data.id}`, JSON.stringify(updatedComments));
+    }
+  };
+
+  const handleDeleteReply = async (comment: ReelComment, replyId: string) => {
+    const updatedReplies = (comment.replies || []).filter(r => r.id !== replyId);
+    try {
+      await updateDoc(doc(db, 'reel_comments_new', comment.id), {
+        replies: updatedReplies
+      });
+    } catch (err) {
+      console.warn("Firestore delete reply issue, executing local fallback:", err);
+      const updatedComments = comments.map(c => {
+        if (c.id === comment.id) {
+          return { ...c, replies: updatedReplies };
+        }
+        return c;
+      });
+      setComments(updatedComments);
+      localStorage.setItem(`comments_${data.id}`, JSON.stringify(updatedComments));
+    }
+  };
+
+  const handleToggleLikeComment = async (comment: ReelComment) => {
+    const currentUserId = auth.currentUser?.uid || 'anon_user';
+    const isLiked = (comment.likes || []).includes(currentUserId);
+    const updatedLikes = isLiked 
+      ? (comment.likes || []).filter(uid => uid !== currentUserId)
+      : [...(comment.likes || []), currentUserId];
+
+    try {
+      await updateDoc(doc(db, 'reel_comments_new', comment.id), {
+        likes: updatedLikes
+      });
+    } catch (err) {
+      console.warn("Firestore like comment issue, using local fallback:", err);
+      const updatedComments = comments.map(c => {
+        if (c.id === comment.id) {
+          return { ...c, likes: updatedLikes };
+        }
+        return c;
+      });
+      setComments(updatedComments);
+      localStorage.setItem(`comments_${data.id}`, JSON.stringify(updatedComments));
+    }
+  };
+
+  const handleToggleLikeReply = async (comment: ReelComment, reply: ReelReply) => {
+    const currentUserId = auth.currentUser?.uid || 'anon_user';
+    const isLiked = (reply.likes || []).includes(currentUserId);
+    const updatedLikes = isLiked
+      ? (reply.likes || []).filter(uid => uid !== currentUserId)
+      : [...(reply.likes || []), currentUserId];
+
+    const updatedReplies = (comment.replies || []).map(r => {
+      if (r.id === reply.id) {
+        return { ...r, likes: updatedLikes };
+      }
+      return r;
+    });
+
+    try {
+      await updateDoc(doc(db, 'reel_comments_new', comment.id), {
+        replies: updatedReplies
+      });
+    } catch (err) {
+      console.warn("Firestore like reply issue, using local fallback:", err);
+      const updatedComments = comments.map(c => {
+        if (c.id === comment.id) {
+          return { ...c, replies: updatedReplies };
+        }
+        return c;
+      });
+      setComments(updatedComments);
+      localStorage.setItem(`comments_${data.id}`, JSON.stringify(updatedComments));
+    }
+  };
+
+  const getReactionNames = (likes: string[]) => {
+    if (!likes || likes.length === 0) return '';
+    const names = likes.map(userId => {
+      if (userId === auth.currentUser?.uid) return 'You';
+      if (userId === 'user1') return 'AlexRiver';
+      if (userId === 'user2') return 'NatureWalks';
+      if (userId === 'user3') return 'Sophie_Dev';
+      return 'User';
+    });
+    return 'Liked by ' + names.join(', ');
+  };
   
   const [copied, setCopied] = useState(false);
   const [sharesCount, setSharesCount] = useState(() => {
@@ -2209,10 +2501,7 @@ function Reel({
               <Heart className="text-white w-7 h-7 group-hover:text-pink-500 transition-colors" />
               <span className="text-white text-xs font-medium">{data.likes}</span>
             </button>
-            <button className="flex flex-col items-center gap-1.5 active:scale-95 transition-transform group">
-              <MessageCircle className="text-white w-7 h-7 group-hover:text-blue-400 transition-colors" />
-              <span className="text-white text-xs font-medium">{data.comments}</span>
-            </button>
+            {/* Comments disabled globally on Reels */}
             <div className="relative flex flex-col items-center">
               <AnimatePresence>
                 {copied && (
@@ -2258,6 +2547,261 @@ function Reel({
 
         </div>
       </div>
+
+      {/* Dynamic Animated Comments Drawer */}
+      <AnimatePresence>
+        {showComments && (
+          <>
+            {/* Backdrop Blur overlay to close comments */}
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => {
+                setShowComments(false);
+                setReplyingTo(null);
+              }}
+              className="absolute inset-0 bg-black/40 backdrop-blur-[1px] z-40 pointer-events-auto cursor-pointer"
+            />
+
+            {/* Slide-out Drawer */}
+            <motion.div
+              initial={{ y: "100%" }}
+              animate={{ y: 0 }}
+              exit={{ y: "100%" }}
+              transition={{ type: "spring", stiffness: 350, damping: 30 }}
+              className="absolute bottom-0 left-0 right-0 h-[65%] bg-neutral-950/95 backdrop-blur-md rounded-t-3xl border-t border-neutral-800/50 z-50 flex flex-col overflow-hidden pointer-events-auto"
+            >
+              {/* Swipe/drag indicator */}
+              <div className="w-12 h-1 bg-zinc-700/50 rounded-full mx-auto mt-3 mb-2" />
+
+              {/* Drawer Header */}
+              <div className="px-4 pb-3 border-b border-neutral-800/40 flex items-center justify-between">
+                <span className="text-white font-bold text-sm tracking-wide">
+                  Comments ({comments.length})
+                </span>
+                <button 
+                  onClick={() => {
+                    setShowComments(false);
+                    setReplyingTo(null);
+                  }}
+                  className="p-1.5 hover:bg-zinc-800/40 text-zinc-400 hover:text-white rounded-full transition-colors cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Scrollable comments list */}
+              <div className="flex-1 overflow-y-auto px-4 py-3 space-y-4 bg-zinc-950/20 scrollbar-none">
+                {comments.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center h-full py-8 text-zinc-500">
+                    <MessageCircle className="w-8 h-8 mb-2 opacity-40 text-neutral-400" />
+                    <p className="text-xs font-semibold">No comments yet</p>
+                    <p className="text-[11px] opacity-75 mt-0.5">Start the conversation!</p>
+                  </div>
+                ) : (
+                  comments.map((comment) => {
+                    const isCommentLiked = comment.likes?.includes(auth.currentUser?.uid || 'anon_user');
+                    const reactionNames = getReactionNames(comment.likes);
+                    
+                    return (
+                      <motion.div 
+                        key={comment.id}
+                        initial={{ opacity: 0, y: 15 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="flex flex-col group/comment gap-1.5 shrink-0"
+                      >
+                        {/* Parent comment body */}
+                        <div className="flex gap-2.5 items-start">
+                          <UserAvatar src={comment.authorAvatar} name={comment.authorName} size="xs" />
+                          
+                          <div className="flex-1 min-w-0 text-left">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="text-xs font-extrabold text-zinc-200">
+                                {comment.authorName}
+                              </span>
+                              {comment.authorId === data.userId && (
+                                <span className="bg-purple-600/20 text-purple-400 text-[9px] font-bold px-1 py-0.5 rounded border border-purple-500/20">
+                                  Creator
+                                </span>
+                              )}
+                              <span className="text-[10px] text-zinc-500 font-medium">
+                                {new Date(comment.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                              </span>
+                            </div>
+                            
+                            <p className="text-zinc-300 text-xs mt-0.5 leading-relaxed break-words">
+                              {comment.text}
+                            </p>
+
+                            {/* Comment Metadata / Action Items */}
+                            <div className="flex items-center gap-3.5 mt-1 text-[10px] text-zinc-500 font-bold select-none">
+                              {comment.likes?.length > 0 && (
+                                <span className="text-zinc-400/90 hover:underline cursor-help" title={reactionNames}>
+                                  {comment.likes.length} {comment.likes.length === 1 ? 'like' : 'likes'}
+                                </span>
+                              )}
+                              <button 
+                                onClick={() => setReplyingTo(comment)}
+                                className="hover:text-zinc-300 active:scale-95 transition-transform"
+                              >
+                                Reply
+                              </button>
+                              
+                              {(isOwner || comment.authorId === auth.currentUser?.uid) && (
+                                <button 
+                                  onClick={() => handleDeleteComment(comment.id)}
+                                  className="text-red-500/80 hover:text-red-400 active:scale-95 transition-transform flex items-center gap-0.5"
+                                >
+                                  <Trash2 className="w-2.5 h-2.5" />
+                                  Delete
+                                </button>
+                              )}
+                            </div>
+
+                            {/* Reaction Names display */}
+                            {reactionNames && (
+                              <p className="text-[9px] text-zinc-650 mt-1 font-medium italic">
+                                {reactionNames}
+                              </p>
+                            )}
+
+                          </div>
+
+                          {/* Heart Icon Button */}
+                          <button 
+                            onClick={() => handleToggleLikeComment(comment)}
+                            className={`p-1 mt-1 transition-transform active:scale-75 cursor-pointer flex items-center justify-center ${
+                              isCommentLiked ? 'text-pink-500' : 'text-zinc-650 hover:text-zinc-400'
+                            }`}
+                          >
+                            <Heart className={`w-3.5 h-3.5 ${isCommentLiked ? 'fill-current' : ''}`} />
+                          </button>
+                        </div>
+
+                        {/* Nested Replies Indented */}
+                        {comment.replies && comment.replies.length > 0 && (
+                          <div className="ml-7 border-l border-zinc-800 pl-4 py-1 space-y-3.5">
+                            {comment.replies.map((reply) => {
+                              const isReplyLiked = reply.likes?.includes(auth.currentUser?.uid || 'anon_user');
+                              const replyReactionNames = getReactionNames(reply.likes);
+                              
+                              return (
+                                <motion.div 
+                                  key={reply.id}
+                                  initial={{ opacity: 0, y: 10 }}
+                                  animate={{ opacity: 1, y: 0 }}
+                                  className="flex gap-2.5 items-start group/reply"
+                                >
+                                  <UserAvatar src={reply.authorAvatar} name={reply.authorName} size="xs" />
+                                  <div className="flex-1 min-w-0 text-left">
+                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                      <span className="text-[11px] font-extrabold text-zinc-300">
+                                        {reply.authorName}
+                                      </span>
+                                      {reply.authorId === data.userId && (
+                                        <span className="bg-purple-600/20 text-purple-400 text-[8px] font-bold px-1 rounded border border-purple-500/20">
+                                          Creator
+                                        </span>
+                                      )}
+                                      <span className="text-[9px] text-zinc-500 font-medium">
+                                        {new Date(reply.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                      </span>
+                                    </div>
+                                    <p className="text-zinc-300 text-[11px] mt-0.5 leading-relaxed break-words">
+                                      {reply.text}
+                                    </p>
+                                    
+                                    <div className="flex items-center gap-2.5 mt-1 text-[9px] text-zinc-500 font-bold">
+                                      {reply.likes?.length > 0 && (
+                                        <span className="text-zinc-400/90 hover:underline cursor-help" title={replyReactionNames}>
+                                          {reply.likes.length} {reply.likes.length === 1 ? 'like' : 'likes'}
+                                        </span>
+                                      )}
+                                      {(isOwner || reply.authorId === auth.currentUser?.uid) && (
+                                        <button 
+                                          onClick={() => handleDeleteReply(comment, reply.id)}
+                                          className="text-red-500/80 hover:text-red-400 active:scale-95 transition-transform flex items-center gap-0.5"
+                                        >
+                                          <Trash2 className="w-2.5 h-2.5" />
+                                          Delete
+                                        </button>
+                                      )}
+                                    </div>
+
+                                    {replyReactionNames && (
+                                      <p className="text-[8px] text-zinc-650 mt-0.5 font-medium italic">
+                                        {replyReactionNames}
+                                      </p>
+                                    )}
+
+                                  </div>
+
+                                  <button 
+                                    onClick={() => handleToggleLikeReply(comment, reply)}
+                                    className={`p-1 mt-0.5 transition-transform active:scale-75 cursor-pointer flex items-center justify-center ${
+                                      isReplyLiked ? 'text-pink-500' : 'text-zinc-650 hover:text-zinc-400'
+                                    }`}
+                                  >
+                                    <Heart className={`w-3 h-3 ${isReplyLiked ? 'fill-current' : ''}`} />
+                                  </button>
+                                </motion.div>
+                              );
+                            })}
+                          </div>
+                        )}
+
+                      </motion.div>
+                    );
+                  })
+                )}
+              </div>
+
+              {/* Replying notification bar if selected */}
+              {replyingTo && (
+                <div className="px-4 py-1.5 bg-purple-950/30 border-t border-purple-900/30 flex items-center justify-between text-[11px] text-purple-300">
+                  <span className="font-semibold">
+                    Replying to @{replyingTo.authorName}
+                  </span>
+                  <button 
+                    onClick={() => setReplyingTo(null)}
+                    className="p-0.5 hover:bg-neutral-800 text-zinc-400 hover:text-white rounded"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </div>
+              )}
+
+              {/* Bottom Comment Input container - sliding animated slide-up inside drawer */}
+              <div className="p-3 border-t border-neutral-800/50 bg-neutral-950 flex items-center gap-2">
+                <UserAvatar 
+                  src={auth.currentUser?.photoURL || undefined} 
+                  name={auth.currentUser?.displayName || 'You'} 
+                  size="xs" 
+                />
+                
+                <form onSubmit={handleAddComment} className="flex-1 flex gap-2 items-center">
+                  <input 
+                    type="text"
+                    value={newCommentText}
+                    onChange={(e) => setNewCommentText(e.target.value)}
+                    placeholder={replyingTo ? `Write a reply...` : "Add a comment..."}
+                    className="flex-1 bg-zinc-900/80 hover:bg-zinc-900 focus:bg-zinc-900 text-white rounded-full px-4 py-2 border border-zinc-800/80 focus:border-zinc-700 focus:outline-none text-xs transition-colors"
+                  />
+                  <button 
+                    type="submit"
+                    disabled={!newCommentText.trim()}
+                    className="h-8 px-4 bg-gradient-to-r from-purple-500 to-pink-500 hover:brightness-110 active:scale-95 text-white text-xs font-bold rounded-full transition-all flex items-center justify-center disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer shadow-indigo-500/10"
+                  >
+                    Post
+                  </button>
+                </form>
+              </div>
+
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 }

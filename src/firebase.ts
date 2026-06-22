@@ -114,3 +114,77 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
   throw new Error(JSON.stringify(errInfo));
 }
 
+export interface GeoCheckResult {
+  isBlocked: boolean;
+  countryName: string;
+  countryCode: string;
+}
+
+const BANNED_COUNTRIES = [
+  'russia', 'russian federation', 'china', 'israel', 'north korea', 
+  "democratic people's republic of korea", 'kp', 'ru', 'cn', 'il'
+];
+
+export async function detectAndCheckGeoblock(): Promise<GeoCheckResult> {
+  let countryName = '';
+  let countryCode = '';
+  
+  try {
+    const apis = [
+      'https://ipapi.co/json/',
+      'https://ip-api.com/json',
+      'https://geolocation-db.com/json/'
+    ];
+    
+    for (const url of apis) {
+      try {
+        const res = await fetch(url);
+        if (res.ok) {
+          const data = await res.json();
+          countryName = data.country_name || data.countryName || data.country || '';
+          countryCode = data.country_code || data.countryCode || data.country || '';
+          if (countryName || countryCode) break;
+        }
+      } catch (e) {
+        console.warn(`Failed geo API fetch from ${url}:`, e);
+      }
+    }
+  } catch (e) {
+    console.error("Global geo check error:", e);
+  }
+  
+  // Fallbacks: timezone & locale checks
+  if (!countryName && !countryCode) {
+    try {
+      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+      const locale = (navigator.language || '').toLowerCase();
+      
+      if (
+        tz.includes('Moscow') || tz.includes('Volgograd') || tz.includes('Asia/Shanghai') || 
+        tz.includes('Asia/Urumqi') || tz.includes('Asia/Jerusalem') || tz.includes('Asia/Tel_Aviv') || 
+        tz.includes('Asia/Pyongyang') || locale === 'ru' || locale.startsWith('ru-') || 
+        locale === 'zh' || locale.startsWith('zh-') || locale.startsWith('he-') || locale === 'he'
+      ) {
+        countryName = 'Restricted Region';
+        countryCode = 'RESTRICTED';
+      }
+    } catch (e) {
+      console.warn("Timezone fallback check failed:", e);
+    }
+  }
+  
+  const lowerName = countryName.toLowerCase();
+  const lowerCode = countryCode.toLowerCase();
+  
+  const isBlocked = BANNED_COUNTRIES.some(banned => 
+    lowerName.includes(banned) || 
+    lowerCode === banned
+  );
+  
+  return {
+    isBlocked,
+    countryName: countryName || 'Unknown',
+    countryCode: countryCode || 'Unknown'
+  };
+}
+

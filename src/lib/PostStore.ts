@@ -39,6 +39,7 @@ export type Post = {
   image: string;
   mediaType: 'image' | 'video';
   likes: string[]; // array of user names
+  likesOverride?: number; // admin override count
   favourites: string[]; // array of user IDs/names
   caption: string;
   timestamp: number;
@@ -118,25 +119,12 @@ class PostStorageSystem {
 
   private init() {
     if (this.unsubscribe) this.unsubscribe();
-    const q = query(collection(db, 'posts'), orderBy('timestamp', 'desc'), limit(50));
+    const q = query(collection(db, 'posts'), orderBy('timestamp', 'desc'), limit(100));
     this.unsubscribe = onSnapshot(q, (snapshot) => {
-      const thirtyDaysAgo = Date.now() - (30 * 24 * 60 * 60 * 1000);
-      
-      this.posts = snapshot.docs
-        .filter(doc => {
-          const data = doc.data();
-          // Filter out matching old posts in-memory immediately for instant feedback
-          if (data.timestamp && data.timestamp < thirtyDaysAgo) {
-            // Delete from Firestore asynchronously
-            deleteDoc(doc.ref).catch(err => console.error("Firestore post auto-delete failed:", err));
-            return false;
-          }
-          return true;
-        })
-        .map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        })) as Post[];
+      this.posts = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })) as Post[];
       
       // Sort in-memory
       this.posts.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
@@ -223,6 +211,16 @@ class PostStorageSystem {
     try {
       const cleaned = cleanUndefined(updates);
       await updateDoc(doc(db, 'posts', id), cleaned);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `posts/${id}`);
+    }
+  }
+
+  async updatePostLikesCount(id: string, count: number) {
+    try {
+      await updateDoc(doc(db, 'posts', id), {
+        likesOverride: count
+      });
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `posts/${id}`);
     }

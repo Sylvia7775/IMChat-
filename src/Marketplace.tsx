@@ -24,7 +24,17 @@ import UserPostsView from './UserPostsView';
 import MediaUploadTool from './components/MediaUploadTool';
 import UserAvatar from './components/UserAvatar';
 
-export default function Marketplace({ onBack }: { onBack: () => void }) {
+export default function Marketplace({ 
+  onBack,
+  currentUserId = '',
+  currentUserName = 'User',
+  profileImg = ''
+}: { 
+  onBack: () => void;
+  currentUserId?: string;
+  currentUserName?: string;
+  profileImg?: string;
+}) {
   const [balance, setBalance] = useState(() => {
     const saved = localStorage.getItem('yolanda_balance');
     return saved ? parseInt(saved) : 0;
@@ -114,7 +124,14 @@ export default function Marketplace({ onBack }: { onBack: () => void }) {
         icon: '📦',
         media: [{ type: 'image', url: mediaPreview.image1 || 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?q=80&w=800&auto=format&fit=crop' }],
         isUserAdded: true,
-        isPending: true
+        isPending: true,
+        seller: {
+          id: currentUserId,
+          name: currentUserName,
+          avatar: profileImg || undefined,
+          rating: 5.0,
+          reviewsCount: 0
+        }
       };
       
       setAllProducts([newItem, ...allProducts]);
@@ -441,10 +458,10 @@ export default function Marketplace({ onBack }: { onBack: () => void }) {
                 className="mt-6 flex items-center justify-between p-3 border border-gray-100 rounded-2xl bg-gray-50 cursor-pointer hover:bg-gray-100 transition-colors"
               >
                  <div className="flex items-center gap-3">
-                     <UserAvatar src={undefined} name="TechStore" size="md" />
+                     <UserAvatar src={selectedItem.seller?.avatar || undefined} name={selectedItem.seller?.name || "TechStore"} size="md" />
                     <div className="flex flex-col">
-                       <span className="font-bold text-gray-900 text-sm">TechStore Pro</span>
-                       <span className="text-xs text-gray-500 flex items-center gap-0.5"><Star className="w-3 h-3 text-yellow-500 fill-yellow-500" /> 4.9 (128 reviews)</span>
+                       <span className="font-bold text-gray-900 text-sm">{selectedItem.seller?.name || "TechStore Pro"}</span>
+                       <span className="text-xs text-gray-500 flex items-center gap-0.5"><Star className="w-3 h-3 text-yellow-500 fill-yellow-500" /> {selectedItem.seller?.rating || 4.9} ({selectedItem.seller?.reviewsCount !== undefined ? selectedItem.seller.reviewsCount : 128} reviews)</span>
                     </div>
                  </div>
                  <ChevronRight className="w-4 h-4 text-gray-400" />
@@ -560,9 +577,17 @@ export default function Marketplace({ onBack }: { onBack: () => void }) {
   };
 
   // 7. Generic Seller Profile Sub-Component
-  const renderSellerProfile = (sellerId: string) => {
-    // For demo, we just show a generic profile with some items
-    const sellerItems = [...TRENDING, ...EXCLUSIVE].slice(0, 3);
+  const renderSellerProfile = () => {
+    const isUserSeller = selectedItem?.seller?.id === currentUserId;
+    const sellerName = selectedItem?.seller?.name || "TechStore Pro";
+    const sellerAvatar = selectedItem?.seller?.avatar || undefined;
+    const rating = selectedItem?.seller?.rating || 4.9;
+    const reviewsCount = selectedItem?.seller?.reviewsCount !== undefined ? selectedItem?.seller.reviewsCount : 128;
+    const sellerDesc = isUserSeller 
+      ? `Official profile of ${sellerName}. Welcome to my listings! Contact me for any questions or support regarding these items.`
+      : `Official account of ${sellerName}. 24/7 support guaranteed.`;
+    
+    const sellerItems = allProducts.filter((p: any) => p.seller?.id === selectedItem?.seller?.id || (!p.seller && !isUserSeller)).slice(0, 3);
     
     return (
       <div className="flex flex-col h-full bg-white overflow-hidden">
@@ -580,19 +605,19 @@ export default function Marketplace({ onBack }: { onBack: () => void }) {
            {/* Profile Card */}
            <div className="p-6 flex flex-col items-center border-b border-gray-50">
               <UserAvatar 
-                 src={undefined} 
-                 name="TechStore"
+                 src={sellerAvatar} 
+                 name={sellerName}
                  size="xl"
                  className="shadow-xl mb-4"
               />
-              <h2 className="text-2xl font-black text-gray-900">TechStore Pro</h2>
+              <h2 className="text-2xl font-black text-gray-900">{sellerName}</h2>
               <div className="flex items-center gap-2 mt-1">
                  <Star className="w-4 h-4 text-yellow-500 fill-yellow-500" />
-                 <span className="font-bold text-gray-900">4.9</span>
-                 <span className="text-gray-400 text-sm">(128 reviews)</span>
+                 <span className="font-bold text-gray-900">{rating}</span>
+                 <span className="text-gray-400 text-sm">({reviewsCount} reviews)</span>
               </div>
               <p className="mt-4 text-center text-sm text-gray-600 max-w-xs">
-                Official TechStore account. We specialize in digital assets and electronics. 24/7 support guaranteed.
+                 {sellerDesc}
               </p>
               
               <div className="flex gap-3 mt-6 w-full px-4 justify-center">
@@ -956,7 +981,7 @@ export default function Marketplace({ onBack }: { onBack: () => void }) {
     <div className="flex flex-col h-full bg-gray-50 absolute inset-0 z-50 overflow-hidden">
       {view === 'all_listings' && renderAllListings()}
       {view === 'home' && renderHome()}
-      {view === 'seller_profile' && renderSellerProfile('demo-seller')}
+      {view === 'seller_profile' && renderSellerProfile()}
       {view === 'seller_dashboard' && renderSellerDashboard()}
       {view === 'favorites' && renderFavorites()}
       {view === 'sell' && renderSellItem()}

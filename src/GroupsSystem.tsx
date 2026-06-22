@@ -3,8 +3,9 @@ import { motion, AnimatePresence } from 'motion/react';
 import { 
   Users, Plus, Search, Shield, Image as ImageIcon, ChevronRight, Hash, 
   MessageCircle, MoreVertical, X, Phone, Video, Edit2, Trash2, UserPlus, Ban, ArrowLeft,
-  Smile, Star, BadgeCheck, Loader2, Clock, ListOrdered, ZoomIn, Download
+  Smile, Star, BadgeCheck, Loader2, Clock, ListOrdered, ZoomIn, Download, Radio, Music, Play, Filter, Send
 } from 'lucide-react';
+import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch';
 import GiphyPicker from './components/GiphyPicker';
 import UserAvatar from './components/UserAvatar';
 
@@ -144,11 +145,22 @@ export default function GroupsSystem({ currentUserId, currentUserName, profileIm
   const [showGroupMenu, setShowGroupMenu] = useState(false);
   const [showLeaveConfirmation, setShowLeaveConfirmation] = useState(false);
   
-  const [isPollMode, setIsPollMode] = useState(false);
-  const [pollOptions, setPollOptions] = useState<string[]>(['', '']);
-
   const [groupTab, setGroupTab] = useState<'feed' | 'gallery'>('feed');
+  const [galleryFilter, setGalleryFilter] = useState<'all' | 'photo' | 'video' | 'audio'>('all');
   const [lightboxImage, setLightboxImage] = useState<{url: string; uploaderName: string; timestamp: number} | null>(null);
+
+  // New Styled Composer states & refs
+  const [composerPhotoFile, setComposerPhotoFile] = useState<File | null>(null);
+  const [composerVideoFile, setComposerVideoFile] = useState<File | null>(null);
+  const [composerAudioFile, setComposerAudioFile] = useState<File | null>(null);
+  const [composerMediaPreview, setComposerMediaPreview] = useState<string | null>(null);
+  const [composerMediaType, setComposerMediaType] = useState<'image' | 'video' | 'audio' | 'live' | null>(null);
+  const [isLiveSimulating, setIsLiveSimulating] = useState(false);
+  const [isPostingRichMedia, setIsPostingRichMedia] = useState(false);
+
+  const photoInputRef = useRef<HTMLInputElement>(null);
+  const videoInputRef = useRef<HTMLInputElement>(null);
+  const audioInputRef = useRef<HTMLInputElement>(null);
 
   const activeGroup = groups.find(g => g.id === activeGroupId);
   const myRole = activeGroup?.members.find(m => m.userId === currentUserId)?.role;
@@ -237,68 +249,149 @@ export default function GroupsSystem({ currentUserId, currentUserName, profileIm
     setShowLeaveConfirmation(false);
   };
 
-  const handleAddPost = async (mediaFile?: File) => {
-    if (!postInput.trim() && !mediaFile) return;
-    if (!activeGroupId) return;
-
-    // Background post
-    // setIsUploading(true);
-    try {
-      let mediaUrl = undefined;
-      if (mediaFile) {
-        const res = await uploadToCloudinary(mediaFile, 'image');
-        if (res) mediaUrl = res.secure_url;
-      }
-
-      await GroupStore.addPost(activeGroupId, {
-        authorId: currentUserId,
-        authorName: currentUserName,
-        content: postInput,
-        topic: topicInput || 'General',
-        mediaUrl
-      });
-      setPostInput('');
-      setTopicInput('');
-    } catch (err) {
-      console.error("Failed to add group post:", err);
-    } finally {
-      // setIsUploading(false);
+  const handlePhotoFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setComposerPhotoFile(file);
+      setComposerVideoFile(null);
+      setComposerAudioFile(null);
+      setIsLiveSimulating(false);
+      setComposerMediaType('image');
+      
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        setComposerMediaPreview(event.target?.result as string);
+      };
+      reader.readAsDataURL(file);
     }
   };
 
+  const handleGroupPostPaste = async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      if (item.type.startsWith('image/')) {
+        const file = item.getAsFile();
+        if (file) {
+          e.preventDefault();
+          setComposerPhotoFile(file);
+          setComposerVideoFile(null);
+          setComposerAudioFile(null);
+          setIsLiveSimulating(false);
+          setComposerMediaType('image');
+          
+          const reader = new FileReader();
+          reader.onload = (event) => {
+            setComposerMediaPreview(event.target?.result as string);
+          };
+          reader.readAsDataURL(file);
+          break;
+        }
+      }
+    }
+  };
+
+  const handleVideoFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setComposerVideoFile(file);
+      setComposerPhotoFile(null);
+      setComposerAudioFile(null);
+      setIsLiveSimulating(false);
+      setComposerMediaType('video');
+      setComposerMediaPreview(URL.createObjectURL(file));
+    }
+  };
+
+  const handleAudioFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setComposerAudioFile(file);
+      setComposerPhotoFile(null);
+      setComposerVideoFile(null);
+      setIsLiveSimulating(false);
+      setComposerMediaType('audio');
+      setComposerMediaPreview(file.name);
+    }
+  };
+
+  const handleTriggerLiveSim = () => {
+    setIsLiveSimulating(true);
+    setComposerPhotoFile(null);
+    setComposerVideoFile(null);
+    setComposerAudioFile(null);
+    setComposerMediaType('live');
+    setComposerMediaPreview('simulated-live-stream');
+  };
+
+  const handleRemoveAttachedMedia = () => {
+    setComposerPhotoFile(null);
+    setComposerVideoFile(null);
+    setComposerAudioFile(null);
+    setComposerMediaPreview(null);
+    setComposerMediaType(null);
+    setIsLiveSimulating(false);
+  };
 
   const handleCreatePost = async () => {
-    if (!postInput.trim() || !activeGroupId) return;
-    if (isPollMode && pollOptions.some(opt => !opt.trim())) {
-      alert("Please fill in all poll options.");
+    if (!activeGroupId) return;
+    if (!postInput.trim() && !composerPhotoFile && !composerVideoFile && !composerAudioFile && !isLiveSimulating) {
+      alert("Please enter a message or attach a file to post.");
       return;
     }
-    
-    // Extract tagged users
-    const tags = postInput.match(/@(\w+)/g)?.map(tag => tag.substring(1)) || [];
+
+    setIsPostingRichMedia(true);
     
     try {
+      let finalMediaUrl = undefined;
+      
+      if (composerPhotoFile) {
+        const res = await uploadToCloudinary(composerPhotoFile, 'image');
+        if (res && res.secure_url) {
+          finalMediaUrl = res.secure_url;
+        }
+      } else if (composerVideoFile) {
+        const res = await uploadToCloudinary(composerVideoFile, 'video');
+        if (res && res.secure_url) {
+          finalMediaUrl = res.secure_url;
+        }
+      } else if (composerAudioFile) {
+        const res = await uploadToCloudinary(composerAudioFile, 'video');
+        if (res && res.secure_url) {
+          finalMediaUrl = res.secure_url;
+        }
+      } else if (isLiveSimulating) {
+        finalMediaUrl = 'https://www.w3schools.com/html/mov_bbb.mp4';
+      }
+
+      // Extract tagged users
+      const tags = postInput.match(/@(\w+)/g)?.map(tag => tag.substring(1)) || [];
+      
       await GroupStore.addPost(activeGroupId, {
         authorId: currentUserId,
         authorName: currentUserName,
-        content: postInput,
+        content: isLiveSimulating ? (postInput.trim() ? `${postInput.trim()} (🔴 Live Stream)` : '¡Transmisión en vivo iniciada! 🔴 / Started Live Stream!') : postInput,
         topic: topicInput || undefined,
         taggedUsers: tags,
-        isPoll: isPollMode,
-        pollOptions: isPollMode ? pollOptions.filter(opt => opt.trim() !== '').map(opt => ({
-          id: "opt_" + Math.random().toString(36).substring(2, 9),
-          text: opt.trim(),
-          votes: []
-        })) : undefined
+        mediaUrl: finalMediaUrl
       });
 
+      // Reset composer state
       setPostInput('');
       setTopicInput('');
       setShowTagMenu(false);
-      setIsPollMode(false);
-      setPollOptions(['', '']);
+      setComposerPhotoFile(null);
+      setComposerVideoFile(null);
+      setComposerAudioFile(null);
+      setComposerMediaPreview(null);
+      setComposerMediaType(null);
+      setIsLiveSimulating(false);
     } catch (err) {
-      console.error("Failed to create group post:", err);
+      console.error("Failed to create rich group post:", err);
+      alert("There was an error creating your post.");
+    } finally {
+      setIsPostingRichMedia(false);
     }
   };
 
@@ -413,12 +506,12 @@ export default function GroupsSystem({ currentUserId, currentUserName, profileIm
 
            <div className="flex flex-col gap-2">
              <label className="text-[11px] font-bold text-gray-400 uppercase tracking-wider px-1">Nombre del Grupo / Group Title</label>
-             <input type="text" value={cgTitle} onChange={e => setCgTitle(e.target.value)} placeholder="Ej. Desarrolladores IMChat, Amigos de Yolanda" className="w-full bg-white border border-gray-200 rounded-xl p-4 text-gray-900 font-semibold outline-none focus:border-brand-blue transition-colors shadow-sm" />
+             <input type="text" value={cgTitle} onChange={e => setCgTitle(e.target.value)} placeholder="e.g. IMChat Developers, Friends Group" className="w-full bg-white border border-gray-200 rounded-xl p-4 text-gray-900 font-semibold outline-none focus:border-brand-blue transition-colors shadow-sm" />
            </div>
 
            <div className="flex flex-col gap-2">
              <label className="text-[11px] font-bold text-gray-400 uppercase tracking-wider px-1">Descripción / Description</label>
-             <textarea value={cgDesc} onChange={e => setCgDesc(e.target.value)} placeholder="¿De qué trata este grupo? / What is this group about?" rows={3} className="w-full bg-white border border-gray-200 rounded-xl p-4 text-gray-900 text-sm outline-none resize-none focus:border-brand-blue transition-colors shadow-sm" />
+             <textarea value={cgDesc} onChange={e => setCgDesc(e.target.value)} placeholder="What is this group about?" rows={3} className="w-full bg-white border border-gray-200 rounded-xl p-4 text-gray-900 text-sm outline-none resize-none focus:border-brand-blue transition-colors shadow-sm" />
            </div>
 
            <div className="flex flex-col gap-2">
@@ -690,29 +783,166 @@ export default function GroupsSystem({ currentUserId, currentUserName, profileIm
               </div>
 
               <div className="p-4 flex flex-col gap-4">
-                 {groupTab === 'gallery' ? (
-                    <div className="grid grid-cols-3 gap-1">
-                      {activeGroup.posts.filter(p => p.mediaUrl).map(post => (
-                        <div 
-                          key={`gallery-${post.id}`} 
-                          className="aspect-square bg-gray-100 relative group overflow-hidden cursor-pointer"
-                          onClick={() => setLightboxImage({ url: post.mediaUrl!, uploaderName: post.authorName, timestamp: post.timestamp })}
-                        >
-                          <img src={post.mediaUrl} className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105" alt="Gallery Media" />
-                          <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center p-2 text-center text-white">
-                            <ZoomIn className="w-6 h-6 mb-1"/>
-                            <span className="font-bold text-xs line-clamp-1">{post.authorName}</span>
+                  {groupTab === 'gallery' ? (() => {
+                    const postsWithMedia = activeGroup.posts.filter(p => p.mediaUrl);
+                    
+                    const filteredMediaPosts = postsWithMedia.filter(post => {
+                      const url = post.mediaUrl!;
+                      const isVideo = url.match(/\.(mp4|webm|mov|ogg|m4v)(\?|$)/i) || url.includes('mov_bbb') || url.includes('/video/upload/') || url.includes('simulated-live-stream');
+                      const isAudio = url.match(/\.(mp3|wav|m4a|aac|flac)(\?|$)/i);
+                      
+                      if (galleryFilter === 'photo') {
+                        return !isVideo && !isAudio;
+                      } else if (galleryFilter === 'video') {
+                        return isVideo;
+                      } else if (galleryFilter === 'audio') {
+                        return isAudio;
+                      }
+                      return true;
+                    });
+
+                    const photoPostsCount = postsWithMedia.filter(post => {
+                      const url = post.mediaUrl!;
+                      const isVideo = url.match(/\.(mp4|webm|mov|ogg|m4v)(\?|$)/i) || url.includes('mov_bbb') || url.includes('/video/upload/') || url.includes('simulated-live-stream');
+                      const isAudio = url.match(/\.(mp3|wav|m4a|aac|flac)(\?|$)/i);
+                      return !isVideo && !isAudio;
+                    }).length;
+
+                    const videoPostsCount = postsWithMedia.filter(post => {
+                      const url = post.mediaUrl!;
+                      return url.match(/\.(mp4|webm|mov|ogg|m4v)(\?|$)/i) || url.includes('mov_bbb') || url.includes('/video/upload/') || url.includes('simulated-live-stream');
+                    }).length;
+
+                    const audioPostsCount = postsWithMedia.filter(post => {
+                      const url = post.mediaUrl!;
+                      return url.match(/\.(mp3|wav|m4a|aac|flac)(\?|$)/i);
+                    }).length;
+
+                    return (
+                      <div className="flex flex-col gap-4 w-full text-left">
+                        {/* Filter Chips Bar */}
+                        <div className="flex gap-2 pb-1 border-b border-gray-150 overflow-x-auto scrollbar-none select-none">
+                          <button
+                            type="button"
+                            onClick={() => setGalleryFilter('all')}
+                            className={`px-3.5 py-1.5 rounded-full text-xs font-bold whitespace-nowrap transition-all ${
+                              galleryFilter === 'all' 
+                                ? 'bg-purple-600 text-white shadow-sm shadow-purple-600/20' 
+                                : 'bg-gray-100 hover:bg-gray-200 text-gray-600'
+                            }`}
+                          >
+                            All ({postsWithMedia.length})
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setGalleryFilter('photo')}
+                            className={`px-3.5 py-1.5 rounded-full text-xs font-bold whitespace-nowrap transition-all ${
+                              galleryFilter === 'photo' 
+                                ? 'bg-purple-600 text-white shadow-sm shadow-purple-600/20' 
+                                : 'bg-gray-100 hover:bg-gray-200 text-gray-600'
+                            }`}
+                          >
+                            📸 Photos ({photoPostsCount})
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setGalleryFilter('video')}
+                            className={`px-3.5 py-1.5 rounded-full text-xs font-bold whitespace-nowrap transition-all ${
+                              galleryFilter === 'video' 
+                                ? 'bg-purple-600 text-white shadow-sm shadow-purple-600/20' 
+                                : 'bg-gray-100 hover:bg-gray-200 text-gray-600'
+                            }`}
+                          >
+                            🎥 Videos ({videoPostsCount})
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setGalleryFilter('audio')}
+                            className={`px-3.5 py-1.5 rounded-full text-xs font-bold whitespace-nowrap transition-all ${
+                              galleryFilter === 'audio' 
+                                ? 'bg-purple-600 text-white shadow-sm shadow-purple-600/20' 
+                                : 'bg-gray-100 hover:bg-gray-200 text-gray-600'
+                            }`}
+                          >
+                            🎵 Audios ({audioPostsCount})
+                          </button>
+                        </div>
+
+                        {/* Gallery Content */}
+                        {filteredMediaPosts.length === 0 ? (
+                          <div className="py-16 flex flex-col items-center justify-center text-gray-400 text-center w-full">
+                            <ImageIcon className="w-12 h-12 mb-3 text-purple-200 animate-pulse" />
+                            <h4 className="font-bold text-gray-800 text-sm">No media found</h4>
+                            <p className="text-xs text-gray-400 mt-1 max-w-[240px]">There are no items matching this category in the group gallery.</p>
                           </div>
-                        </div>
-                      ))}
-                      {activeGroup.posts.filter(p => p.mediaUrl).length === 0 && (
-                        <div className="col-span-3 py-10 flex flex-col items-center text-gray-400">
-                          <ImageIcon className="w-10 h-10 mb-2 opacity-50" />
-                          <span className="text-sm font-bold">No media shared yet</span>
-                        </div>
-                      )}
-                    </div>
-                 ) : (() => {
+                        ) : (
+                          <div className="grid grid-cols-3 gap-1.5">
+                            {filteredMediaPosts.map(post => {
+                              const url = post.mediaUrl!;
+                              const isVid = url.match(/\.(mp4|webm|mov|ogg|m4v)(\?|$)/i) || url.includes('mov_bbb') || url.includes('/video/upload/') || url.includes('simulated-live-stream');
+                              const isAud = url.match(/\.(mp3|wav|m4a|aac|flac)(\?|$)/i);
+
+                              if (isAud) {
+                                return (
+                                  <div 
+                                    key={`gallery-${post.id}`}
+                                    onClick={() => setLightboxImage({ url, uploaderName: post.authorName, timestamp: post.timestamp })}
+                                    className="col-span-3 p-3 bg-gradient-to-r from-purple-50/60 to-pink-50/40 border border-purple-100/60 rounded-2xl flex items-center justify-between gap-3 hover:border-purple-300 transition-all cursor-pointer group"
+                                  >
+                                    <div className="flex items-center gap-3 min-w-0">
+                                      <div className="p-3 bg-purple-500 text-white rounded-xl shadow-md shadow-purple-500/10 group-hover:scale-105 transition-transform">
+                                        <Music className="w-4 h-4" />
+                                      </div>
+                                      <div className="truncate text-left min-w-0">
+                                        <p className="text-xs font-extrabold text-purple-950 truncate">Vocal Clip Shared</p>
+                                        <p className="text-[10px] text-gray-400 truncate mt-0.5">By {post.authorName} • {new Date(post.timestamp).toLocaleDateString()}</p>
+                                      </div>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-[10px] bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full font-bold uppercase tracking-wider font-extrabold">Audio</span>
+                                      <ZoomIn className="w-4 h-4 text-purple-400 opacity-0 group-hover:opacity-100 transition-opacity" />
+                                    </div>
+                                  </div>
+                                );
+                              }
+
+                              return (
+                                <div 
+                                  key={`gallery-${post.id}`} 
+                                  className="aspect-square bg-gray-100 relative group overflow-hidden cursor-pointer rounded-xl border border-gray-150"
+                                  onClick={() => setLightboxImage({ url, uploaderName: post.authorName, timestamp: post.timestamp })}
+                                >
+                                  {isVid ? (
+                                    <>
+                                      <video 
+                                        src={url} 
+                                        className="w-full h-full object-cover" 
+                                        muted 
+                                        loop 
+                                        playsInline
+                                      />
+                                      <div className="absolute top-2 left-2 z-10 p-1.5 bg-black/60 rounded-lg text-white">
+                                        <Play className="w-3.5 h-3.5" />
+                                      </div>
+                                    </>
+                                  ) : (
+                                    <img src={url} className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105" alt="Gallery item" />
+                                  )}
+                                  
+                                  {/* Hover overlay details */}
+                                  <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-all flex flex-col items-center justify-end p-2 pb-3 text-center text-white backdrop-blur-[1px]">
+                                    <ZoomIn className="w-5 h-5 mb-auto mt-2 text-purple-400 scale-90 group-hover:scale-100 transition-transform"/>
+                                    <span className="font-extrabold text-[10px] leading-tight line-clamp-1">{post.authorName}</span>
+                                    <span className="text-[8px] text-gray-300 uppercase font-black tracking-widest mt-0.5">{isVid ? 'Play Video' : 'Zoom Entry'}</span>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })() : (() => {
                    const itemsToRender: any[] = [];
                const activeGroupAds: any[] = [];
                
@@ -812,43 +1042,31 @@ export default function GroupsSystem({ currentUserId, currentUserName, profileIm
                       return word + ' ';
                     })}
                   </p>
-                  {post.isPoll && post.pollOptions && (() => {
-                    const totalVotes = post.pollOptions!.reduce((acc, curr) => acc + curr.votes.length, 0);
-                    return (
-                      <div className="mt-3 flex flex-col gap-2">
-                        {post.pollOptions!.map((opt) => {
-                          const voteCount = opt.votes.length;
-                          const percentage = totalVotes === 0 ? 0 : Math.round((voteCount / totalVotes) * 100);
-                          const hasVoted = opt.votes.includes(currentUserId);
-                          
-                          return (
-                            <div 
-                              key={opt.id} 
-                              className={`relative rounded-xl overflow-hidden border transition-colors cursor-pointer ${hasVoted ? 'border-brand-blue bg-blue-50/30' : 'bg-gray-50 border-gray-100 hover:border-gray-300'}`}
-                              onClick={() => GroupStore.votePoll(activeGroupId, post.id, opt.id, currentUserId)}
-                            >
-                              <div className="absolute top-0 left-0 bottom-0 bg-blue-100/50 transition-all duration-500" style={{ width: `${percentage}%` }} />
-                              <div className="relative flex justify-between items-center p-3">
-                                <div className="flex items-center gap-2 relative z-10 w-full pr-8">
-                                  <div className={`w-4 h-4 rounded-full border flex-shrink-0 flex items-center justify-center ${hasVoted ? 'border-brand-blue bg-brand-blue' : 'border-gray-300 bg-white'}`}>
-                                     {hasVoted && <div className="w-1.5 h-1.5 bg-white rounded-full" />}
-                                  </div>
-                                  <span className="font-bold text-sm text-gray-800 truncate">{opt.text}</span>
-                                </div>
-                                <span className="text-xs font-bold text-gray-500 relative z-10 flex-shrink-0">{percentage}%</span>
-                              </div>
-                            </div>
-                          );
-                        })}
-                        <div className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">{totalVotes} {totalVotes === 1 ? 'Vote' : 'Votes'}</div>
-                      </div>
-                    );
+                  {post.mediaUrl && (() => {
+                    const isVideo = post.mediaUrl.match(/\.(mp4|webm|mov|ogg|m4v)(\?|$)/i) || post.mediaUrl.includes('mov_bbb') || post.mediaUrl.includes('/video/upload/');
+                    const isAudio = post.mediaUrl.match(/\.(mp3|wav|m4a|aac|flac)(\?|$)/i);
+                    
+                    if (isVideo) {
+                      return (
+                        <div className="mt-2 rounded-xl overflow-hidden border border-gray-100 bg-black max-h-80 flex items-center justify-center">
+                          <video src={post.mediaUrl} controls className="max-w-full max-h-80" />
+                        </div>
+                      );
+                    } else if (isAudio) {
+                      return (
+                        <div className="mt-2 p-3 rounded-xl border border-gray-150 bg-gray-50 flex flex-col gap-1 text-left w-full">
+                          <p className="text-[10px] text-purple-600 font-bold uppercase tracking-widest">🎵 Audio Track Shared</p>
+                          <audio src={post.mediaUrl} controls className="w-full mt-1" />
+                        </div>
+                      );
+                    } else {
+                      return (
+                        <div className="mt-2 rounded-xl overflow-hidden border border-gray-150 max-h-60 flex items-center justify-center bg-gray-50">
+                          <img src={post.mediaUrl} className="max-w-full h-auto object-contain" alt="Post media" />
+                        </div>
+                      );
+                    }
                   })()}
-                  {post.mediaUrl && (
-                    <div className="mt-2 rounded-xl overflow-hidden border border-gray-100 max-h-60 flex items-center justify-center bg-gray-50">
-                      <img src={post.mediaUrl} className="max-w-full h-auto object-contain" alt="Post media" />
-                    </div>
-                  )}
                 </div>
               );
             });
@@ -866,7 +1084,30 @@ export default function GroupsSystem({ currentUserId, currentUserName, profileIm
 
         {/* Input Area */}
         {isMember && (
-          <div className="p-3 bg-white border-t border-gray-200 z-10 flex flex-col gap-2 relative">
+          <div className="p-4 bg-white border-t border-gray-150 z-10 flex flex-col gap-3 relative shadow-md">
+            {/* Real hidden inputs for the 3 visual source modes in the screenshot */}
+            <input 
+              type="file" 
+              accept="image/*" 
+              ref={photoInputRef} 
+              className="hidden" 
+              onChange={handlePhotoFileChange} 
+            />
+            <input 
+              type="file" 
+              accept="video/*" 
+              ref={videoInputRef} 
+              className="hidden" 
+              onChange={handleVideoFileChange} 
+            />
+            <input 
+              type="file" 
+              accept="audio/*" 
+              ref={audioInputRef} 
+              className="hidden" 
+              onChange={handleAudioFileChange} 
+            />
+
             <AnimatePresence>
                {showGiphy && (
                  <div className="absolute bottom-[calc(100%+10px)] left-4 right-4 z-50">
@@ -875,7 +1116,7 @@ export default function GroupsSystem({ currentUserId, currentUserName, profileIm
                )}
             </AnimatePresence>
             {showTagMenu && (
-              <div className="absolute bottom-[calc(100%+10px)] left-4 right-4 bg-white border border-gray-100 rounded-2xl shadow-xl z-30 max-h-40 overflow-y-auto flex flex-col p-1">
+              <div className="absolute bottom-[calc(100%+10px)] left-4 right-4 bg-white border border-gray-100 rounded-2xl shadow-xl z-30 max-h-40 overflow-y-auto flex flex-col p-1 animate-fade-in">
                 {activeGroup.members.filter(m => m.name.toLowerCase().includes(tagSearch.toLowerCase())).map(m => (
                   <button 
                     key={m.userId}
@@ -893,68 +1134,180 @@ export default function GroupsSystem({ currentUserId, currentUserName, profileIm
                 ))}
               </div>
             )}
+
+            {/* Topic Input Row */}
             <div className="flex gap-2 w-full">
-               <input type="text" value={topicInput} onChange={e=>setTopicInput(e.target.value)} placeholder="Topic (Optional)" className="bg-gray-100 px-3 py-1.5 rounded-lg text-xs outline-none w-1/3 text-brand-blue font-semibold placeholder-gray-400" />
+               <input 
+                 type="text" 
+                 value={topicInput} 
+                 onChange={e=>setTopicInput(e.target.value)} 
+                 placeholder="Topic/Hashtag (Optional)" 
+                 className="bg-gray-50 border border-gray-150 px-3.5 py-1.5 rounded-xl text-xs outline-none w-1/2 text-purple-600 font-extrabold placeholder-gray-400 focus:bg-white focus:border-purple-300 transition-colors" 
+               />
             </div>
-            <div className="flex bg-gray-100 rounded-xl p-1 items-center flex-wrap">
-              <button 
-                onClick={() => setIsPollMode(!isPollMode)}
-                className={`p-2 transition-colors rounded-lg flex items-center gap-1 ${isPollMode ? 'text-brand-blue bg-blue-50' : 'text-gray-500 hover:text-brand-blue'}`}
-              >
-                <ListOrdered className="w-5 h-5" />
-              </button>
-              <button 
-                onClick={() => setShowGiphy(!showGiphy)}
-                className="p-2 text-gray-500 hover:text-brand-blue transition-colors rounded-lg"
-              >
-                <Smile className="w-5 h-5" />
-              </button>
-              <input 
+
+            {/* Main Composition text-area styled exactly like the screenshot */}
+            <div className="w-full relative">
+              <textarea 
                 id="group-post-input" 
-                type="text" 
                 value={postInput} 
                 onChange={e=>handleInputChange(e.target.value)} 
-                placeholder={isPollMode ? "Ask a question..." : "Post to group... use @ to tag"} 
-                className="bg-transparent px-3 py-2 outline-none flex-1 font-medium text-gray-900 text-sm" 
+                onPaste={handleGroupPostPaste}
+                placeholder="What's on your mind?" 
+                rows={3}
+                className="w-full bg-white border border-gray-150 rounded-2xl p-4 text-gray-800 text-sm outline-none resize-none focus:border-purple-300 transition-all placeholder-gray-400 font-medium" 
               />
-              <button disabled={!postInput.trim()} onClick={handleCreatePost} className="bg-brand-blue text-white p-2 rounded-lg disabled:opacity-50 active:scale-95 transition-all"><MessageCircle className="w-5 h-5"/></button>
-              
-              {isPollMode && (
-                <div className="w-full mt-2 space-y-2 p-2 relative">
-                  {pollOptions.map((opt, idx) => (
-                    <div key={idx} className="flex gap-2 items-center">
-                      <input
-                        type="text"
-                        value={opt}
-                        onChange={(e) => {
-                          const newOpts = [...pollOptions];
-                          newOpts[idx] = e.target.value;
-                          setPollOptions(newOpts);
-                        }}
-                        placeholder={`Option ${idx + 1}`}
-                        className="flex-1 bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm font-medium outline-none focus:ring-2 focus:ring-brand-blue/20"
-                      />
-                      {pollOptions.length > 2 && (
-                        <button onClick={() => {
-                          const newOpts = pollOptions.filter((_, i) => i !== idx);
-                          setPollOptions(newOpts);
-                        }} className="text-gray-400 hover:text-red-500 p-1">
-                          <X className="w-4 h-4" />
-                        </button>
-                      )}
+            </div>
+
+            {/* Media/Rich attachment previews with Remove capabilities */}
+            {composerMediaPreview && (
+              <div className="bg-gray-50 rounded-2xl p-3 border border-gray-150 relative">
+                <button 
+                  onClick={handleRemoveAttachedMedia}
+                  className="absolute top-2 right-2 z-10 p-1.5 bg-black/60 hover:bg-black/80 rounded-full text-white transition-colors"
+                  title="Remove Attachment"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+                <p className="text-[9px] uppercase font-black tracking-widest text-purple-600 mb-2 text-left px-1">
+                  {composerMediaType === 'image' && '📸 Image Attachment'}
+                  {composerMediaType === 'video' && '🎥 Video Attachment'}
+                  {composerMediaType === 'audio' && '🎵 Audio Attachment'}
+                  {composerMediaType === 'live' && '🔴 Live Stream Simulated'}
+                </p>
+                <div className="rounded-xl overflow-hidden max-h-[140px] flex items-center justify-center bg-gray-100">
+                  {composerMediaType === 'image' && (
+                    <img src={composerMediaPreview} className="w-full max-h-[140px] object-cover" alt="Attachment Preview" />
+                  )}
+                  {composerMediaType === 'video' && (
+                    <video src={composerMediaPreview} className="w-full max-h-[140px] object-cover" controls />
+                  )}
+                  {composerMediaType === 'audio' && (
+                    <div className="w-full p-4 flex items-center gap-3 bg-white border border-gray-100 rounded-xl">
+                      <div className="p-2 bg-emerald-50 text-emerald-600 rounded-lg">
+                        <Music className="w-5 h-5" />
+                      </div>
+                      <div className="truncate text-left">
+                        <p className="text-xs font-bold text-gray-850 truncate">{composerMediaPreview}</p>
+                        <p className="text-[10px] text-gray-400">Audio Track Ready to Post</p>
+                      </div>
                     </div>
-                  ))}
-                  {pollOptions.length < 10 && (
-                     <button 
-                       onClick={() => setPollOptions([...pollOptions, ''])}
-                       className="text-xs font-bold text-brand-blue hover:underline"
-                     >
-                       + Add Option
-                     </button>
+                  )}
+                  {composerMediaType === 'live' && (
+                    <div className="w-full p-6 flex flex-col items-center justify-center bg-red-500/10 text-red-600 rounded-xl relative overflow-hidden">
+                      <span className="absolute top-2 right-2 flex h-2 w-2">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
+                      </span>
+                      <Radio className="w-8 h-8 text-red-600 animate-pulse mb-2" />
+                      <p className="text-xs font-extrabold uppercase tracking-widest">TRANSMISIÓN EN VIVO SIMULADA</p>
+                      <p className="text-[10px] text-red-400 mt-1">A sample broadcasting feed will be posted to the group stream</p>
+                    </div>
                   )}
                 </div>
-              )}
+              </div>
+            )}
+
+            {/* Option Buttons exact row styled from the screenshot with integrated Send button */}
+            <div className="flex items-center justify-between gap-2 py-2 pr-1 border-t border-gray-100 select-none">
+              <div className="flex items-center gap-3.5 flex-wrap flex-1 min-w-0">
+                {/* Photo option */}
+                <button 
+                  type="button"
+                  onClick={() => photoInputRef.current?.click()}
+                  className={`flex items-center gap-1.5 py-1.5 px-2.5 rounded-full text-xs font-extrabold transition-all active:scale-95 cursor-pointer hover:bg-purple-50`}
+                >
+                  <span className="p-1 bg-purple-50 rounded-lg"><ImageIcon className="w-4 h-4 text-[#7928CA]" /></span>
+                  <span className="text-[#7928CA]">Photo</span>
+                </button>
+
+                {/* Video option */}
+                <button 
+                  type="button"
+                  onClick={() => videoInputRef.current?.click()}
+                  className="flex items-center gap-1.5 py-1.5 px-2.5 rounded-full text-xs font-extrabold transition-all active:scale-95 cursor-pointer hover:bg-blue-50"
+                >
+                  <span className="p-1 bg-blue-50 rounded-lg"><Video className="w-4 h-4 text-blue-600" /></span>
+                  <span className="text-blue-600">Video</span>
+                </button>
+
+                {/* Audio option */}
+                <button 
+                  type="button"
+                  onClick={() => audioInputRef.current?.click()}
+                  className="flex items-center gap-1.5 py-1.5 px-2.5 rounded-full text-xs font-extrabold transition-all active:scale-95 cursor-pointer hover:bg-emerald-50"
+                >
+                  <span className="p-1 bg-emerald-50 rounded-lg"><Music className="w-4 h-4 text-emerald-600" /></span>
+                  <span className="text-emerald-600">Audio</span>
+                </button>
+
+                {/* Go Live option */}
+                <button 
+                  type="button"
+                  onClick={handleTriggerLiveSim}
+                  className="flex items-center gap-1.5 py-1.5 px-2.5 rounded-full text-xs font-extrabold transition-all active:scale-95 cursor-pointer hover:bg-red-50"
+                >
+                  <span className="p-1 bg-red-50 rounded-lg"><Radio className="w-4 h-4 text-red-500 animate-pulse" /></span>
+                  <span className="text-red-500">Go Live</span>
+                </button>
+
+                {/* Smiley option */}
+                <button 
+                  type="button"
+                  onClick={() => setShowGiphy(!showGiphy)}
+                  className="p-2 text-amber-500 hover:bg-amber-50 transition-colors rounded-full active:scale-95 cursor-pointer"
+                >
+                  <Smile className="w-5 h-5 text-amber-500" />
+                </button>
+              </div>
+
+              {/* Sticky accessible Send/Post Button */}
+              <button 
+                id="group-composer-send-btn"
+                disabled={isPostingRichMedia || (!postInput.trim() && !composerPhotoFile && !composerVideoFile && !composerAudioFile && !isLiveSimulating)}
+                onClick={handleCreatePost}
+                className="px-6 py-2.5 bg-gradient-to-r from-[#d08bfd] to-[#fa92cd] hover:brightness-[1.03] active:scale-[0.97] text-white text-xs font-extrabold rounded-full shadow-md shadow-pink-200/25 transition-all text-center flex items-center justify-center gap-2 cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed border-0 shrink-0 select-none"
+              >
+                {isPostingRichMedia ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin text-white" />
+                    <span>Posting...</span>
+                  </>
+                ) : (
+                  <>
+                    <Send className="w-3.5 h-3.5 text-white fill-none" />
+                    <span>Send</span>
+                  </>
+                )}
+              </button>
             </div>
+
+            {/* Bottom Section with the elegant GRADIENT POST button aligned right */}
+            <div className="flex items-center justify-between border-t border-gray-100 pt-3 mt-1">
+              <div className="text-[10px] text-gray-400 font-extrabold uppercase tracking-widest pl-1">
+                {isPostingRichMedia ? (
+                   <span className="flex items-center gap-1.5"><Loader2 className="w-3.5 h-3.5 animate-spin text-purple-600" /> Posting...</span>
+                ) : (
+                   <span>Press Post to share</span>
+                )}
+              </div>
+              
+              <button 
+                disabled={isPostingRichMedia || (!postInput.trim() && !composerPhotoFile && !composerVideoFile && !composerAudioFile && !isLiveSimulating)}
+                onClick={handleCreatePost}
+                className="px-8 py-2 bg-gradient-to-r from-[#d08bfd] to-[#fa92cd] hover:brightness-[1.03] active:scale-[0.97] text-white text-sm font-bold rounded-full shadow-md shadow-pink-200/20 transition-all text-center flex items-center justify-center gap-2 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed border-0"
+              >
+                {isPostingRichMedia ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin text-white" />
+                    <span>Posting...</span>
+                  </>
+                ) : (
+                  <span>Post</span>
+                )}
+              </button>
+            </div>
+
           </div>
         )}
 
@@ -1009,7 +1362,7 @@ export default function GroupsSystem({ currentUserId, currentUserName, profileIm
                     <textarea 
                       value={editGroupDesc} 
                       onChange={e => setEditGroupDesc(e.target.value)} 
-                      placeholder="¿De qué trata este grupo?"
+                      placeholder="What is this group about?"
                       rows={2}
                       className="w-full bg-gray-50 border border-gray-200 rounded-xl p-3.5 text-gray-900 text-sm outline-none resize-none focus:bg-white focus:ring-2 focus:ring-brand-blue/20 focus:border-brand-blue transition-all"
                     />
@@ -1330,13 +1683,62 @@ export default function GroupsSystem({ currentUserId, currentUserName, profileIm
               </button>
             </div>
           </div>
-          <div className="flex-1 flex items-center justify-center p-4 overflow-hidden relative" onClick={(e) => e.stopPropagation()}>
-            {/* The image itself */}
-            <img 
-              src={lightboxImage.url} 
-              className="max-w-full max-h-full object-contain drop-shadow-2xl brightness-110 active:scale-[1.02] transition-transform duration-300"
-              alt="Gallery Full Size" 
-            />
+          <div className="flex-1 flex items-center justify-center overflow-hidden relative w-full h-full" onClick={(e) => e.stopPropagation()}>
+            {(() => {
+              const url = lightboxImage.url;
+              const isVideo = url.match(/\.(mp4|webm|mov|ogg|m4v)(\?|$)/i) || url.includes('mov_bbb') || url.includes('/video/upload/') || url.includes('simulated-live-stream');
+              const isAudio = url.match(/\.(mp3|wav|m4a|aac|flac)(\?|$)/i);
+              if (isVideo) {
+                return (
+                  <video 
+                    src={url} 
+                    className="max-w-full max-h-[80vh] rounded-2xl object-contain shadow-2xl border border-white/10" 
+                    controls 
+                    autoPlay 
+                    playsInline
+                  />
+                );
+              }
+              if (isAudio) {
+                return (
+                  <div className="bg-neutral-900 border border-neutral-800 rounded-3xl p-8 max-w-sm w-full flex flex-col items-center gap-6 shadow-2xl relative" onClick={(e) => e.stopPropagation()}>
+                    <div className="w-20 h-20 rounded-full bg-gradient-to-tr from-purple-500 to-pink-500 flex items-center justify-center text-white text-3xl shadow-lg shadow-purple-500/20">
+                      <Music className="w-8 h-8 text-white animate-pulse" />
+                    </div>
+                    <div className="text-center">
+                      <h4 className="font-extrabold text-white text-sm tracking-tight font-sans">Vocal Clip Shared</h4>
+                      <p className="text-[11px] text-neutral-400 mt-1">By {lightboxImage.uploaderName}</p>
+                    </div>
+                    <audio 
+                      src={url} 
+                      className="w-full mt-2" 
+                      controls 
+                      autoPlay
+                    />
+                  </div>
+                );
+              }
+              return (
+                <TransformWrapper
+                  initialScale={1}
+              initialPositionX={0}
+              initialPositionY={0}
+              centerOnInit={true}
+              minScale={0.5}
+              maxScale={8}
+            >
+              {({ zoomIn, zoomOut, resetTransform }) => (
+                <TransformComponent wrapperStyle={{ width: '100%', height: '100%' }} contentStyle={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <img 
+                    src={lightboxImage.url} 
+                    className="max-w-full max-h-full object-contain drop-shadow-2xl brightness-110"
+                    alt="Gallery Full Size" 
+                  />
+                </TransformComponent>
+              )}
+            </TransformWrapper>
+              );
+            })()}
           </div>
         </div>
       )}

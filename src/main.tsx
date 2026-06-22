@@ -5,27 +5,16 @@ import './index.css';
 import { Analytics } from "@vercel/analytics/react";
 import { SpeedInsights } from "@vercel/speed-insights/react";
 
-// Unregister old Service Workers to prevent caching stale React bundles and layout screens
+// Register Service Worker for Offline PWA support
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.getRegistrations().then((registrations) => {
-    for (const registration of registrations) {
-      registration.unregister().then(() => {
-        console.log('Service Worker successfully unregistered');
-      });
-    }
-  });
-}
-
-// Clear all caches on load to ensure the user gets the most up-to-date app bundle
-if ('caches' in window) {
-  caches.keys().then((cacheNames) => {
-    return Promise.all(
-      cacheNames.map((cacheName) => {
-        return caches.delete(cacheName);
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js')
+      .then((reg) => {
+        console.log('[Service Worker] Registered successfully with scope:', reg.scope);
       })
-    );
-  }).then(() => {
-    console.log('All caches cleared successfully.');
+      .catch((err) => {
+        console.error('[Service Worker] Registration failed:', err);
+      });
   });
 }
 

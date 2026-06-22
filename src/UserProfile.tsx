@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Camera, CloudSun, Grid3X3, PlaySquare, UserSquare2, Heart, Folder, Plus, X, Edit2, Trash2, Replace, Send, BadgeCheck, ShieldCheck, Instagram, RefreshCw, HardDrive, Search, FileVideo, FileImage, Image as ImageIcon, Loader2, Users, Star, Phone, Wallet, QrCode, Copy, Smile, Upload, Link as LinkIcon } from 'lucide-react';
+import { Camera, CloudSun, Grid3X3, PlaySquare, UserSquare2, Heart, Folder, Plus, X, Edit2, Trash2, Replace, Send, BadgeCheck, ShieldCheck, ShieldAlert, Instagram, RefreshCw, HardDrive, Search, FileVideo, FileImage, Image as ImageIcon, Loader2, Users, Star, Phone, Wallet, QrCode, Copy, Smile, Upload, Link as LinkIcon } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { MediaStore, MediaItem, MAX_FILE_SIZE } from './lib/MediaStorage';
 import { auth, db, handleFirestoreError, OperationType } from './firebase';
@@ -91,6 +91,8 @@ export default function UserProfile({
   const [isSharingToReels, setIsSharingToReels] = useState(false);
   const [shareCaption, setShareCaption] = useState('');
   const [verifiedStatus, setVerifiedStatus] = useState(false);
+  const [profileAdminFollowers, setProfileAdminFollowers] = useState<number | null>(null);
+  const [profileAdminFollowing, setProfileAdminFollowing] = useState<number | null>(null);
   const [isDeletingMedia, setIsDeletingMedia] = useState(false);
   const [deletionMessage, setDeletionMessage] = useState<string | null>(null);
   const [failedReelThumbs, setFailedReelThumbs] = useState<Record<string, boolean>>({});
@@ -211,6 +213,19 @@ export default function UserProfile({
       if (snap.exists()) {
         const data = snap.data();
         setSelectedStickers(data.selectedStickers || []);
+        
+        if (data.adminFollowersCount !== undefined) {
+          setProfileAdminFollowers(data.adminFollowersCount);
+        } else {
+          setProfileAdminFollowers(null);
+        }
+        
+        if (data.adminFollowingCount !== undefined) {
+          setProfileAdminFollowing(data.adminFollowingCount);
+        } else {
+          setProfileAdminFollowing(null);
+        }
+
         if (data.isVerified !== undefined) {
           setVerifiedStatus(data.isVerified);
         } else {
@@ -273,12 +288,6 @@ export default function UserProfile({
         // Match by userId first to prevent conflicts with matching simple default names like 'User'
         if (p.userId && p.userId !== activeUserId) return false;
         if (!p.userId && p.user.name !== activeUserName) return false;
-        if (p.visibility === 'private' && p.userId !== myId) return false;
-        if (p.visibility === 'friends') {
-          const isCreator = p.userId === myId;
-          const isAllowed = p.allowedUserIds && p.allowedUserIds.includes(myId);
-          if (!isCreator && !isAllowed) return false;
-        }
         return true;
       });
       setUserPosts(filtered);
@@ -635,35 +644,53 @@ export default function UserProfile({
 
     try {
       // Proxy fetch to avoid CORS issues
-      const res = await fetch(`/api/fetch-url-blob?url=${encodeURIComponent(rawUrl)}`);
-      if (!res.ok) {
-        throw new Error("Failed to fetch URL from the remote server.");
+      let blob: Blob | null = null;
+      let file: File | null = null;
+      try {
+        const res = await fetch(`/api/fetch-url-blob?url=${encodeURIComponent(rawUrl)}`);
+        if (res.ok) {
+          blob = await res.blob();
+          
+          let ext = 'tmp';
+          if (blob.type.includes('image/jpeg')) ext = 'jpg';
+          else if (blob.type.includes('image/png')) ext = 'png';
+          else if (blob.type.includes('video/mp4')) ext = 'mp4';
+          else {
+            ext = urlUploadFallbackType === 'video' ? 'mp4' : 'jpg';
+          }
+          const filename = `url-upload-${Date.now()}.${ext}`;
+          file = new File([blob], filename, { type: blob.type || (urlUploadFallbackType === 'video' ? 'video/mp4' : 'image/jpeg') });
+        }
+      } catch (proxyErr) {
+        console.warn("Proxy download failed, falling back to direct URL reference:", proxyErr);
       }
 
-      const blob = await res.blob();
-      
-      // Determine extension/type
-      let ext = 'tmp';
-      if (blob.type.includes('image/jpeg')) ext = 'jpg';
-      else if (blob.type.includes('image/png')) ext = 'png';
-      else if (blob.type.includes('video/mp4')) ext = 'mp4';
-      else {
-        // basic fallback
-        ext = urlUploadFallbackType === 'video' ? 'mp4' : 'jpg';
+      if (file) {
+        activeUploadSource.current = 'upload'; // Act as normal upload
+        await processAndUploadFile(file);
+      } else {
+        // Fallback: Directly reference the URL!
+        const isVideo = urlUploadFallbackType === 'video';
+        const { MediaStore } = await import('./lib/MediaStorage');
+        const res = await MediaStore.addMedia({
+          url: rawUrl,
+          thumbnailUrl: rawUrl,
+          type: isVideo ? 'video' : 'image',
+          sizeBytes: 1024, // Placeholder size
+          userId: activeUserId,
+          source: 'upload'
+        });
+        if (!res.success) {
+          alert(res.message || "Failed to add URL reference to library.");
+        }
       }
-
-      const filename = `url-upload-${Date.now()}.${ext}`;
-      const file = new File([blob], filename, { type: blob.type || (urlUploadFallbackType === 'video' ? 'video/mp4' : 'image/jpeg') });
-
-      activeUploadSource.current = 'upload'; // Act as normal upload
-      await processAndUploadFile(file);
       
       setUploadUrlText('');
       setDeletionMessage("Successfully added from URL!");
       setTimeout(() => setDeletionMessage(null), 3000);
     } catch (e) {
       console.error("URL upload error:", e);
-      alert("Error adding from URL: Could not download the media.");
+      alert("Error adding from URL: Could not add the media.");
     } finally {
       setIsMediaAdding(false);
     }
@@ -725,7 +752,10 @@ export default function UserProfile({
     'Garrett_Smith': 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?auto=format&fit=crop&q=80&w=300&h=300',
     'Garrett _Smith': 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?auto=format&fit=crop&q=80&w=300&h=300',
     'Kimberly_MGraw': 'https://blogger.googleusercontent.com/img/b/R29vZ2xl/AVvXsEhFNgNudbKpXFVSNQL6aaNYVfUfgDAWsKr5HziGgpha6eI6CCHlJhNUgxPMdRbvGV5oMz9_4vfexZDA-6Qh9S1MrQ1j3L7hFvwTBYxSOW9kT7hblyRd0hRD82S2psqUVwyKW37-4oXGbiFaGurk58S4X2P0usXZsqK1rceJTEvcCcjwEXICwvTMOZ4zCvo/s1600/2314627059_f4565a6d45_b.jpg',
-    'Kimberly MGraw': 'https://blogger.googleusercontent.com/img/b/R29vZ2xl/AVvXsEhFNgNudbKpXFVSNQL6aaNYVfUfgDAWsKr5HziGgpha6eI6CCHlJhNUgxPMdRbvGV5oMz9_4vfexZDA-6Qh9S1MrQ1j3L7hFvwTBYxSOW9kT7hblyRd0hRD82S2psqUVwyKW37-4oXGbiFaGurk58S4X2P0usXZsqK1rceJTEvcCcjwEXICwvTMOZ4zCvo/s1600/2314627059_f4565a6d45_b.jpg'
+    'Kimberly MGraw': 'https://blogger.googleusercontent.com/img/b/R29vZ2xl/AVvXsEhFNgNudbKpXFVSNQL6aaNYVfUfgDAWsKr5HziGgpha6eI6CCHlJhNUgxPMdRbvGV5oMz9_4vfexZDA-6Qh9S1MrQ1j3L7hFvwTBYxSOW9kT7hblyRd0hRD82S2psqUVwyKW37-4oXGbiFaGurk58S4X2P0usXZsqK1rceJTEvcCcjwEXICwvTMOZ4zCvo/s1600/2314627059_f4565a6d45_b.jpg',
+    'Lena Vega': 'https://blogger.googleusercontent.com/img/b/R29vZ2xl/AVvXsEg5j-pPN754Y9YjFKCw9G2SR88RGX3neS785PLQBNvuRt-ekvverINAsFR1Oqk4Wn_OAP4xWuJVSucWCz7QjJLIaJPrilgfuSU6pXI1_5PrG3-riu06lJGMwLHO62i_5nNPGWTNFrDSkAtnnxQy56wN3eCXhQHQHGOlF8-7H0YxypL7alChyphenhypheni2SjOstx5Y/s1600/83431817_601803343948197_3390380263576961024_n.jpg',
+    'Lena_Vega': 'https://blogger.googleusercontent.com/img/b/R29vZ2xl/AVvXsEg5j-pPN754Y9YjFKCw9G2SR88RGX3neS785PLQBNvuRt-ekvverINAsFR1Oqk4Wn_OAP4xWuJVSucWCz7QjJLIaJPrilgfuSU6pXI1_5PrG3-riu06lJGMwLHO62i_5nNPGWTNFrDSkAtnnxQy56wN3eCXhQHQHGOlF8-7H0YxypL7alChyphenhypheni2SjOstx5Y/s1600/83431817_601803343948197_3390380263576961024_n.jpg',
+    'Lena': 'https://blogger.googleusercontent.com/img/b/R29vZ2xl/AVvXsEg5j-pPN754Y9YjFKCw9G2SR88RGX3neS785PLQBNvuRt-ekvverINAsFR1Oqk4Wn_OAP4xWuJVSucWCz7QjJLIaJPrilgfuSU6pXI1_5PrG3-riu06lJGMwLHO62i_5nNPGWTNFrDSkAtnnxQy56wN3eCXhQHQHGOlF8-7H0YxypL7alChyphenhypheni2SjOstx5Y/s1600/83431817_601803343948197_3390380263576961024_n.jpg'
   };
   if (user && robotImages[user.name]) {
     displayImage = robotImages[user.name];
@@ -740,11 +770,11 @@ export default function UserProfile({
       return { ...s, value: postCount.toString() };
     }
     if (s.label === 'Followers') {
-      const manualCount = isCurrentUser ? currentUserSettings?.adminFollowersCount : user?.adminFollowersCount;
+      const manualCount = profileAdminFollowers !== null ? profileAdminFollowers : (isCurrentUser ? currentUserSettings?.adminFollowersCount : user?.adminFollowersCount);
       return { ...s, value: (manualCount !== undefined && manualCount !== null) ? manualCount.toString() : followersCount.toString() };
     }
     if (s.label === 'Following') {
-      const manualCount = isCurrentUser ? currentUserSettings?.adminFollowingCount : user?.adminFollowingCount;
+      const manualCount = profileAdminFollowing !== null ? profileAdminFollowing : (isCurrentUser ? currentUserSettings?.adminFollowingCount : user?.adminFollowingCount);
       return { ...s, value: (manualCount !== undefined && manualCount !== null) ? manualCount.toString() : followingCount.toString() };
     }
     return s;
@@ -759,7 +789,7 @@ export default function UserProfile({
           {/* Avatar styled with gradient storytelling ring */}
           <div className="relative shrink-0 flex items-center justify-center p-[3px] rounded-full bg-gradient-to-tr from-yellow-500 via-pink-500 to-purple-600 shadow-sm">
             <div 
-              className={`w-[100px] h-[100px] rounded-full overflow-hidden border-[3px] border-white shrink-0 relative group bg-gray-50 ${isCurrentUser && !isUploading ? 'cursor-pointer active:scale-95 transition-all' : ''}`}
+              className={`w-[102px] h-[102px] rounded-full overflow-hidden border-[3px] border-white shrink-0 relative group bg-gray-50 ${isCurrentUser && !isUploading ? 'cursor-pointer active:scale-95 transition-all' : ''}`}
               onClick={() => isCurrentUser && !isUploading && fileInputRef?.current?.click()}
             >
                 <UserAvatar 
@@ -903,72 +933,6 @@ export default function UserProfile({
             >
               <CloudSun className={`w-4 h-4 text-gray-600 transition-transform ${isMenuOpen ? 'rotate-45 text-purple-600' : ''}`} strokeWidth={2.5} />
             </button>
-
-            <AnimatePresence>
-              {isMenuOpen && (
-                <>
-                  {/* Backdrop */}
-                  <div className="fixed inset-0 z-40" onClick={() => setIsMenuOpen(false)} />
-                  
-                  {/* Menu Options dropdown */}
-                  <motion.div 
-                    initial={{ opacity: 0, scale: 0.95, y: 10 }}
-                    animate={{ opacity: 1, scale: 1, y: 0 }}
-                    exit={{ opacity: 0, scale: 0.95, y: 10 }}
-                    className="absolute right-0 top-full mt-2 w-64 bg-white border border-gray-100 rounded-xl shadow-xl z-50 py-1.5 overflow-hidden text-left"
-                  >
-                    <div className="px-3 py-2 border-b border-gray-50 text-[10px] font-bold text-gray-400 uppercase tracking-wider">
-                      Profile & Gallery Actions
-                    </div>
-
-                    {isCurrentUser ? (
-                      <>
-                        <button 
-                          onClick={handlePurgeAllMyContent}
-                          disabled={isBulkDeleting}
-                          className="w-full px-3.5 py-2.5 flex items-center gap-2.5 hover:bg-red-50 text-red-600 font-bold text-xs transition-colors disabled:opacity-50"
-                        >
-                          <Trash2 className="w-4 h-4 text-red-500" />
-                          <span>Empty All My Profile Content</span>
-                        </button>
-                        
-                        <button 
-                          onClick={() => {
-                            const current = localStorage.getItem('imchat_hide_seed_reels') === 'true';
-                            localStorage.setItem('imchat_hide_seed_reels', current ? 'false' : 'true');
-                            setIsMenuOpen(false);
-                            window.location.reload();
-                          }}
-                          className="w-full px-3.5 py-2.5 flex items-center gap-2.5 hover:bg-gray-50 text-gray-700 font-semibold text-xs transition-colors"
-                        >
-                          <RefreshCw className="w-4 h-4 text-gray-500" />
-                          <span>{localStorage.getItem('imchat_hide_seed_reels') === 'true' ? 'Show Default Reels' : 'Hide Default Reels'}</span>
-                        </button>
-                      </>
-                    ) : (
-                      <p className="px-4 py-3 text-xs text-gray-500 italic">No actions available on other profiles.</p>
-                    )}
-
-                    {/* Admin/Owner Exclusive Area */}
-                    {(auth.currentUser?.email?.toLowerCase() === 'mobilephonesky987@gmail.com' || auth.currentUser?.email?.toLowerCase() === 'contact@imchat.im') && (
-                      <>
-                        <div className="px-3 py-2 border-t border-b border-gray-50 bg-gray-50 text-[10px] font-bold text-gray-400 uppercase tracking-wider mt-1.5">
-                          Admin Controls
-                        </div>
-                        <button 
-                          onClick={handleAdminCleanAllUnknownAndOrphanMedia}
-                          disabled={isBulkDeleting}
-                          className="w-full px-3.5 py-2.5 flex items-center gap-2.5 hover:bg-purple-50 text-purple-700 font-bold text-xs transition-colors disabled:opacity-50"
-                        >
-                          <ShieldCheck className="w-4 h-4 text-purple-600" />
-                          <span>Purge Unknown Reels & Posts</span>
-                        </button>
-                      </>
-                    )}
-                  </motion.div>
-                </>
-              )}
-            </AnimatePresence>
           </div>
         </div>
 
@@ -1225,7 +1189,7 @@ export default function UserProfile({
                   <div className="flex gap-4 text-white font-bold text-sm">
                     <div className="flex items-center gap-1">
                       <Heart className="w-4 h-4 fill-white text-white" />
-                      <span>{post.likes.length}</span>
+                      <span>{typeof post.likesOverride === 'number' ? post.likesOverride : post.likes.length}</span>
                     </div>
                     {post.favourites && post.favourites.length > 0 && (
                       <div className="flex items-center gap-1">
@@ -1334,14 +1298,6 @@ export default function UserProfile({
                 {/* Branded Horizontal Pill buttons as shown in mockup */}
                 <div className="flex items-center gap-2 overflow-x-auto no-scrollbar py-1 pr-1 scrollbar-none flex-1 justify-end">
                   <button
-                    onClick={() => setShowUrlUpload(true)}
-                    className="bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white px-3.5 py-1.5 rounded-full text-xs font-extrabold flex items-center gap-1 shadow-sm shrink-0 transition-all cursor-pointer"
-                  >
-                    <LinkIcon className="w-3.5 h-3.5 text-white" />
-                    <span>URL</span>
-                  </button>
-
-                  <button
                     onClick={() => {
                       activeUploadSource.current = 'flickr';
                       mediaInputRef.current?.click();
@@ -1363,15 +1319,13 @@ export default function UserProfile({
                     <span>Sync IG</span>
                   </button>
 
+                  {/* URL Upload Button replaces Google Drive */}
                   <button
-                    onClick={() => {
-                      activeUploadSource.current = 'google-drive';
-                      mediaInputRef.current?.click();
-                    }}
-                    className="bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white px-3.5 py-1.5 rounded-full text-xs font-extrabold flex items-center gap-1 shadow-sm shrink-0 transition-all cursor-pointer"
+                    onClick={() => setShowUrlUpload(true)}
+                    className="bg-gradient-to-r from-[#FF007A] via-[#7928CA] to-[#00F0FF] hover:brightness-110 active:scale-95 text-white px-3.5 py-1.5 rounded-full text-xs font-extrabold flex items-center gap-1 shadow-md shadow-purple-500/10 shrink-0 transition-all cursor-pointer animate-pulse"
                   >
-                    <HardDrive className="w-3.5 h-3.5 text-white" />
-                    <span>Drive</span>
+                    <LinkIcon className="w-3.5 h-3.5 text-white" />
+                    <span>URL Link</span>
                   </button>
 
                   <button

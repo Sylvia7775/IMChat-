@@ -48,7 +48,9 @@ import {
   Mic,
   AlertTriangle,
   ExternalLink,
-  Music
+  Music,
+  Link2,
+  UploadCloud
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -61,7 +63,7 @@ import {
   Tooltip 
 } from 'recharts';
 import { useState, useRef, ChangeEvent, useEffect, lazy, Suspense } from 'react';
-import { auth, db, handleFirestoreError, OperationType } from './firebase';
+import { auth, db, handleFirestoreError, OperationType, detectAndCheckGeoblock } from './firebase';
 import { collection, query, where, onSnapshot, doc, setDoc, deleteDoc, addDoc, getDocs, getDoc, serverTimestamp, limit, updateDoc } from 'firebase/firestore';
 import { onAuthStateChanged, User as FirebaseUser, signOut } from 'firebase/auth';
 import AIAssistantIcon from './components/AIAssistantIcon';
@@ -71,6 +73,7 @@ import UserAvatar from './components/UserAvatar';
 import CookieConsentBanner from './components/CookieConsentBanner';
 import { uploadToCloudinary } from './lib/cloudinary';
 import { playNotificationSound } from './lib/NotificationSound';
+import { PostStore } from './lib/PostStore';
 
 // Lazy loaded components
 const UploadReel = lazy(() => import('./UploadReel'));
@@ -82,9 +85,11 @@ const HomeFeed = lazy(() => import('./HomeFeed')) as React.ComponentType<{
   profileImg?: string;
   userSettings?: any;
   userRole?: string;
+  onUpdateAvatar?: (url: string) => Promise<void> | void;
 }>;
 const UserDirectory = lazy(() => import('./UserDirectory'));
 import CallHistory from './CallHistory';
+import TrendsPage from './TrendsPage';
 const ReelsFeed = lazy(() => import('./ReelsFeed'));
 const UserProfile = lazy(() => import('./UserProfile'));
 const ChatSystem = lazy(() => import('./ChatSystem'));
@@ -93,7 +98,6 @@ const AIAssistantSystem = lazy(() => import('./components/AIAssistantSystem'));
 const ImageGeneratorPage = lazy(() => import('./ImageGeneratorPage'));
 const VideoGenerator = lazy(() => import('./VideoGenerator'));
 const MusicGeneratorPage = lazy(() => import('./MusicGeneratorPage'));
-const TrendsPage = lazy(() => import('./TrendsPage'));
 const GoLivePage = lazy(() => import('./GoLivePage'));
 const GroupsSystem = lazy(() => import('./GroupsSystem'));
 const Marketplace = lazy(() => import('./Marketplace'));
@@ -104,6 +108,7 @@ const LinkedInLogin = lazy(() => import('./LinkedInLogin'));
 const MembershipPage = lazy(() => import('./MembershipPage'));
 const LanguagesPage = lazy(() => import('./LanguagesPage'));
 const FAQPage = lazy(() => import('./FAQPage'));
+const PolicyPage = lazy(() => import('./PolicyPage'));
 const SupportSystem = lazy(() => import('./SupportSystem'));
 const SandboxPage = lazy(() => import('./SandboxPage'));
 const GradleCompilerLogs = lazy(() => import('./GradleCompilerLogs'));
@@ -215,8 +220,23 @@ export default function App() {
     if (file && user) {
       setIsProcessingAvatar(true);
       try {
-        const processedFile = await fastProcessImage(file);
-        const res = await uploadToCloudinary(processedFile, 'image');
+        const fileName = file.name.toLowerCase();
+        const isSpecialType = fileName.endsWith('.svg') || 
+                              fileName.endsWith('.sgv') || 
+                              fileName.endsWith('.gif') || 
+                              fileName.endsWith('.mp4') || 
+                              file.type.includes('svg') || 
+                              file.type.includes('gif') || 
+                              file.type.includes('video/') ||
+                              file.type.includes('mp4');
+
+        let processedFile: Blob | File = file;
+        if (!isSpecialType) {
+          processedFile = await fastProcessImage(file);
+        }
+
+        const isVideo = fileName.endsWith('.mp4') || file.type.startsWith('video/');
+        const res = await uploadToCloudinary(processedFile, isVideo ? 'video' : 'image');
         if (res) {
           await handleUpdateAvatar(res.secure_url);
         }
@@ -233,6 +253,36 @@ export default function App() {
     const fixAnna = async () => {
       try {
         const usersSnap = await getDocs(collection(db, 'users'));
+
+        // Delete hacker profile accounts: @st_exact, @st_probe or named ST Exact, ST Probe
+        const hackers = usersSnap.docs.filter(d => {
+          const nameLower = (d.data().name || '').toLowerCase();
+          const usernameLower = (d.data().username || '').toLowerCase();
+          return nameLower.includes('st_exact') || nameLower.includes('st_probe') ||
+                 usernameLower.includes('st_exact') || usernameLower.includes('st_probe') ||
+                 nameLower.includes('st exact') || nameLower.includes('st probe');
+        });
+
+        for (const hDoc of hackers) {
+          const hUid = hDoc.id;
+          console.log(`Deleting hacker document: ${hUid}`);
+          await deleteDoc(doc(db, "users", hUid));
+
+          try {
+            const postsSnap = await getDocs(query(collection(db, "posts"), where("userId", "==", hUid)));
+            for (const pDoc of postsSnap.docs) {
+              await deleteDoc(pDoc.ref);
+            }
+          } catch (pe) {
+            console.error("Failed to delete hacker posts", pe);
+          }
+
+          if (auth.currentUser && auth.currentUser.uid === hUid) {
+            await signOut(auth);
+            window.location.reload();
+          }
+        }
+
         const qs = usersSnap.docs.filter(d => {
           const n = (d.data().name || "").toLowerCase() + " " + (d.data().username || "").toLowerCase();
           return n.includes("anna_flores") || n.includes("anna") || n.includes("flores");
@@ -317,6 +367,47 @@ export default function App() {
           await addDoc(collection(db, 'media'), {
             userId: targetId,
             url: kimberlyUrl,
+            type: 'image',
+            sizeBytes: 1024,
+            createdAt: serverTimestamp(),
+            source: 'upload'
+          });
+        }
+
+        // Lena Vega seeding
+        const lenaQs = usersSnap.docs.filter(d => {
+          const n = (d.data().name || "").toLowerCase() + " " + (d.data().username || "").toLowerCase();
+          return n.includes("lena") || n.includes("vega");
+        });
+        const lenaUrl = 'https://blogger.googleusercontent.com/img/b/R29vZ2xl/AVvXsEg5j-pPN754Y9YjFKCw9G2SR88RGX3neS785PLQBNvuRt-ekvverINAsFR1Oqk4Wn_OAP4xWuJVSucWCz7QjJLIaJPrilgfuSU6pXI1_5PrG3-riu06lJGMwLHO62i_5nNPGWTNFrDSkAtnnxQy56wN3eCXhQHQHGOlF8-7H0YxypL7alChyphenhypheni2SjOstx5Y/s1600/83431817_601803343948197_3390380263576961024_n.jpg';
+
+        let lFoundIds = lenaQs.map(d => d.id);
+        if (lFoundIds.length === 0) {
+          lFoundIds = ['Lena_Vega'];
+          await setDoc(doc(db, 'users', 'Lena_Vega'), {
+            name: 'Lena',
+            username: 'Lena_Vega',
+            bio: 'Hola! Estoy usando IMChat ❤️✨',
+            avatar: lenaUrl,
+            avatarUrl: lenaUrl,
+            profileImg: lenaUrl,
+            isSetupComplete: true,
+            createdAt: serverTimestamp()
+          });
+        }
+
+        for (const docSnap of lenaQs) {
+          await updateDoc(docSnap.ref, {
+            avatar: lenaUrl,
+            avatarUrl: lenaUrl,
+            profileImg: lenaUrl
+          });
+        }
+
+        for (const targetId of lFoundIds) {
+          await addDoc(collection(db, 'media'), {
+            userId: targetId,
+            url: lenaUrl,
             type: 'image',
             sizeBytes: 1024,
             createdAt: serverTimestamp(),
@@ -426,7 +517,7 @@ export default function App() {
     if (!user) return;
 
     // Listen to following
-    const followingQuery = query(collection(db, "follows"), where("followerId", "==", user.uid), limit(100));
+    const followingQuery = query(collection(db, "follows"), where("followerId", "==", user.uid));
     const unsubFollowing = onSnapshot(followingQuery, (snap) => {
       const state: Record<string, boolean> = {};
       snap.docs.forEach(doc => {
@@ -438,7 +529,15 @@ export default function App() {
       handleFirestoreError(error, OperationType.LIST, "follows");
     });
 
-    return () => unsubFollowing();
+    const followersQuery = query(collection(db, "follows"), where("followingId", "==", user.uid));
+    const unsubFollowers = onSnapshot(followersQuery, (snap) => {
+      setFollowersCount(snap.size);
+    });
+
+    return () => {
+      unsubFollowing();
+      unsubFollowers();
+    };
   }, [user]);
 
   const toggleFollow = async (targetUserId: string) => {
@@ -659,8 +758,38 @@ export default function App() {
     lowDataMode: false,
     emailMarketing: true,
     emailSecurityAlerts: true,
-    emailActivityNotifications: true
+    emailActivityNotifications: true,
+    isFrozen: false
   }));
+
+  const [isGeoBlocked, setIsGeoBlocked] = useState(false);
+  const [geoBlockedCountry, setGeoBlockedCountry] = useState('');
+
+  useEffect(() => {
+    async function checkBlockedCountry() {
+      try {
+        const geo = await detectAndCheckGeoblock();
+        if (geo.isBlocked) {
+          setIsGeoBlocked(true);
+          setGeoBlockedCountry(geo.countryName);
+          if (auth.currentUser) {
+            try {
+              await updateDoc(doc(db, "users", auth.currentUser.uid), {
+                role: 'banned',
+                isBanned: true,
+                bannedReason: `Accessing from restricted country: ${geo.countryName}`
+              });
+            } catch (err) {
+              console.error("Auto banning user record failed:", err);
+            }
+          }
+        }
+      } catch (e) {
+        console.error("Geoblock check error:", e);
+      }
+    }
+    checkBlockedCountry();
+  }, [user]);
 
   useEffect(() => {
     if (!user) return;
@@ -730,7 +859,8 @@ export default function App() {
           emailMarketing: data.emailMarketing ?? true,
           emailSecurityAlerts: data.emailSecurityAlerts ?? true,
           emailActivityNotifications: data.emailActivityNotifications ?? true,
-          selectedStickers: data.selectedStickers || []
+          selectedStickers: data.selectedStickers || [],
+          isFrozen: data.isFrozen ?? false
         };
         setUserSettings(settings);
         if (data.avatar) setProfileImg(data.avatar);
@@ -867,6 +997,10 @@ export default function App() {
       ...data
     };
     setUserSettings(mergedData);
+    if (data.avatar) {
+      setProfileImg(data.avatar);
+      localStorage.setItem('profileImg', data.avatar);
+    }
     
     try {
       await setDoc(doc(db, "users", user.uid), {
@@ -880,6 +1014,7 @@ export default function App() {
 
   const handleUpdateAvatar = async (url: string) => {
     setProfileImg(url);
+    localStorage.setItem('profileImg', url);
     setUserHasAvatar(true);
     setIsSetupComplete(true);
     if (user) {
@@ -1049,6 +1184,32 @@ export default function App() {
         <div className="flex flex-col items-center gap-4">
           <div className="w-12 h-12 border-4 border-[#0A66C2] border-t-transparent rounded-full animate-spin"></div>
           <p className="text-gray-500 font-medium">Loading IMChat...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (isGeoBlocked || userRole === 'banned') {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-900 text-white p-6 md:p-12 selection:bg-red-500/30 selection:text-red-200">
+        <div className="max-w-md w-full bg-slate-950 border border-red-500/20 p-8 rounded-3xl shadow-2xl flex flex-col items-center text-center space-y-6">
+          <div className="inline-flex p-4 bg-red-500/10 text-red-500 rounded-2xl">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+          </div>
+          <h1 className="text-2xl font-black tracking-tight text-white">ACCESS DENIED</h1>
+          <p className="text-gray-400 text-sm leading-relaxed text-center">
+            {userRole === 'banned' 
+              ? "Your account has been permanently banned from IMChat due to platform or regional policy violations."
+              : `This application suffers compliance restrictions and is not available in your region (${geoBlockedCountry || 'Restricted Area'}).`}
+          </p>
+          <div className="text-xs text-red-400 font-mono py-1.5 px-3 bg-red-500/5 rounded-xl border border-red-500/10 inline-block">
+            ERROR_CODE: GEO_COMPLIANCE_BLOCK
+          </div>
+          <p className="text-gray-500 text-xs text-center">
+            If you believe this is in error, please contact administration or reconnect from an alternate network.
+          </p>
         </div>
       </div>
     );
@@ -1252,7 +1413,7 @@ export default function App() {
       </svg>
 
       {/* Header */}
-      {!['reels', 'chats', 'channels', 'ai', 'ai_image', 'ai_video', 'ai_music', 'group', 'marketplace', 'calendar', 'selfie'].includes(activeNav) && (
+      {!['reels', 'chats', 'channels', 'ai', 'ai_image', 'ai_video', 'ai_music', 'group', 'marketplace', 'calendar', 'selfie', 'policy'].includes(activeNav) && (
       <header className="bg-brand-blue p-3 flex items-center gap-3 sticky top-0 z-50 shadow-md">
         <Menu 
           className="text-white w-[25px] h-[25px] cursor-pointer hover:opacity-80 active:scale-95 transition-all shrink-0" 
@@ -1398,6 +1559,13 @@ export default function App() {
                 />
               </div>
             )}
+            {activeNav === 'policy' && (
+              <div className="flex-1 overflow-hidden relative">
+                <PolicyPage 
+                  onBack={() => setActiveNav('home')} 
+                />
+              </div>
+            )}
             {activeNav === 'group' && (
               <div className="flex-1 overflow-hidden relative">
                 <GroupsSystem 
@@ -1407,7 +1575,16 @@ export default function App() {
                 />
               </div>
             )}
-            {activeNav === 'marketplace' && <div className="flex-1 overflow-hidden relative">< Marketplace onBack={() => setActiveNav('home')} /></div>}
+            {activeNav === 'marketplace' && (
+              <div className="flex-1 overflow-hidden relative">
+                <Marketplace 
+                  onBack={() => setActiveNav('home')} 
+                  currentUserId={user?.uid || ''}
+                  currentUserName={userSettings?.name || 'User'}
+                  profileImg={profileImg}
+                />
+              </div>
+            )}
             {activeNav === 'membership' && <div className="flex-1 overflow-hidden relative"><MembershipPage onBack={() => setActiveNav('home')} /></div>}
             {activeNav === 'trends' && (
               <div className="flex-1 overflow-hidden relative">
@@ -1530,6 +1707,7 @@ export default function App() {
                 profileImg={profileImg}
                 userSettings={userSettings}
                 userRole={userRole}
+                onUpdateAvatar={handleUpdateAvatar}
               />
             )}
             {activeNav === 'directory' && (
@@ -1614,13 +1792,14 @@ export default function App() {
       {/* Hidden File Input for Avatar */}
       <input
         type="file"
-        accept="image/*"
+        accept="image/jpeg,image/png,image/gif,image/svg+xml,video/mp4,.svg,.sgv,.jpg,.jpeg,.png,.gif,.mp4"
         ref={fileInputRef}
         onChange={handlePhotoCapture}
         className="hidden"
       />
 
       {/* Bottom Navigation */}
+      {activeNav !== 'policy' && (
       <nav className="fixed bottom-0 left-0 right-0 w-full max-w-[500px] mx-auto bg-white border-t border-gray-100 flex items-center justify-around py-2 px-1 z-40">
         {[
           { id: 'reels', icon: Film, label: 'Reels' },
@@ -1668,6 +1847,7 @@ export default function App() {
           </button>
         ))}
       </nav>
+      )}
 
       {/* Create Menu Modal */}
       <AnimatePresence>
@@ -2110,6 +2290,7 @@ export default function App() {
                   { id: 'ai_music', label: 'AI Music (Lyria)', icon: Music },
                   { id: 'settings', label: 'Settings', icon: SlidersHorizontal },
                   { id: 'faq', label: 'FAQ', icon: HelpCircle },
+                  { id: 'policy', label: 'Data Policy', icon: ShieldCheck },
                   { id: 'languages', label: 'Languages', icon: LanguagesIcon },
                   ...((userRole === 'admin' || userRole === 'moderator') ? [{ id: 'admin', label: userRole === 'admin' ? 'Admin Panel' : 'Moderator Panel', icon: ShieldAlert }] : []),
                   { id: 'logout', label: ' Exit ', icon: LogOut },

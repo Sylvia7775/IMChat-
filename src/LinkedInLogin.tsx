@@ -15,7 +15,8 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   auth, 
-  db 
+  db,
+  detectAndCheckGeoblock
 } from './firebase';
 import { 
   signInWithEmailAndPassword, 
@@ -25,7 +26,7 @@ import {
   signInWithPopup,
   updateProfile
 } from 'firebase/auth';
-import { doc, setDoc, serverTimestamp, getDoc } from 'firebase/firestore';
+import { doc, setDoc, serverTimestamp, getDoc, collection, query, where, getDocs } from 'firebase/firestore';
 import { containsProhibitedWords } from './lib/wordFilter';
 
 interface LinkedInLoginProps {
@@ -69,8 +70,6 @@ const COUNTRY_CODES = [
   { code: '+49', name: '🇩🇪 Germany' },
   { code: '+33', name: '🇫🇷 France' },
   { code: '+81', name: '🇯🇵 Japan' },
-  { code: '+86', name: '🇨🇳 China' },
-  { code: '+55', name: '🇧🇷 Brazil' },
   { code: '+34', name: '🇪🇸 Spain' },
   { code: '+30', name: '🇬🇷 Greece' },
   { code: '+48', name: '🇵🇱 Poland' },
@@ -84,7 +83,7 @@ const COUNTRY_CODES = [
   { code: '+54', name: '🇦🇷 Argentina' },
   { code: '+358', name: '🇫🇮 Finland' },
   { code: '+40', name: '🇷🇴 Romania' },
-  { code: '+421', name: '🇸🇰 Slovakia' },
+  { code: '+55', name: '🇧🇷 Brazil' },
   { code: '+57', name: '🇨🇴 Colombia' },
 ];
 
@@ -141,12 +140,21 @@ export default function LinkedInLogin({ onSuccess, onShowFaq }: LinkedInLoginPro
       const result = await signInWithPopup(auth, provider);
       const user = result.user;
       
+      const emailLower = (user.email || '').trim().toLowerCase();
+      if (emailLower.endsWith('imchat.im') || emailLower.split('@')[1] === 'imchat.im') {
+        throw new Error("Registration error: The domain 'imchat.im' or '@imchat.im' is blacklisted.");
+      }
+
       const fullName = user.displayName || 'IMChat User';
       const parts = fullName.split(' ');
       const fName = parts[0] || 'User';
       const lName = parts.slice(1).join(' ') || 'Member';
       const cleanBase = fName.toLowerCase().replace(/[^a-z0-9]/g, '');
-      const autoUsername = `${cleanBase}${Math.floor(100 + Math.random() * 900)}`;
+      let autoUsername = `${cleanBase}${Math.floor(100 + Math.random() * 900)}`;
+      autoUsername = autoUsername.replace(/imchat/g, 'user');
+      if (autoUsername.includes('imchat')) {
+        autoUsername = `user_${Math.floor(1000 + Math.random() * 9000)}`;
+      }
 
       // Double check if account exists in Firestore
       try {
@@ -210,12 +218,21 @@ export default function LinkedInLogin({ onSuccess, onShowFaq }: LinkedInLoginPro
       const result = await signInWithPopup(auth, provider);
       const user = result.user;
       
+      const emailLower = (user.email || '').trim().toLowerCase();
+      if (emailLower.endsWith('imchat.im') || emailLower.split('@')[1] === 'imchat.im') {
+        throw new Error("Registration error: The domain 'imchat.im' or '@imchat.im' is blacklisted.");
+      }
+
       const fullName = user.displayName || 'Yahoo User';
       const parts = fullName.split(' ');
       const fName = parts[0] || 'User';
       const lName = parts.slice(1).join(' ') || 'Member';
       const cleanBase = fName.toLowerCase().replace(/[^a-z0-9]/g, '');
-      const autoUsername = `${cleanBase}${Math.floor(100 + Math.random() * 900)}`;
+      let autoUsername = `${cleanBase}${Math.floor(100 + Math.random() * 900)}`;
+      autoUsername = autoUsername.replace(/imchat/g, 'user');
+      if (autoUsername.includes('imchat')) {
+        autoUsername = `user_${Math.floor(1000 + Math.random() * 9000)}`;
+      }
 
       try {
         const userRef = doc(db, "users", user.uid);
@@ -268,10 +285,34 @@ export default function LinkedInLogin({ onSuccess, onShowFaq }: LinkedInLoginPro
     }
   };
 
+  const isBannedCountry = (dialVal: string, countryVal: string) => {
+    const normDial = dialVal.replace('+', '');
+    const bannedCodes = ['7', '86', '972', '850'];
+    const bannedNames = ['russia', 'china', 'israel', 'north korea'];
+    
+    const matchesCode = bannedCodes.includes(normDial);
+    const matchesName = bannedNames.some(name => countryVal.toLowerCase().includes(name));
+    
+    return matchesCode || matchesName;
+  };
+
   // Triggers sending OTP simulation
-  const handleSendOtp = (e: React.FormEvent) => {
+  const handleSendOtp = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    
+    try {
+      const geo = await detectAndCheckGeoblock();
+      if (geo.isBlocked) {
+        throw new Error(`Compliance Restriction: This app is blocked in your country (${geo.countryName}).`);
+      }
+      if (isBannedCountry(dialCode, selectedCountryName)) {
+        throw new Error(`Compliance Restriction: This app is blocked in your selected country (${selectedCountryName}).`);
+      }
+    } catch (checkErr: any) {
+      setError(checkErr.message);
+      return;
+    }
     
     const cleanNum = phoneNumber.replace(/[^0-9]/g, '');
     if (!cleanNum || cleanNum.length < 7) {
@@ -306,6 +347,14 @@ export default function LinkedInLogin({ onSuccess, onShowFaq }: LinkedInLoginPro
     setLoading(true);
 
     try {
+      const geo = await detectAndCheckGeoblock();
+      if (geo.isBlocked) {
+        throw new Error(`Compliance Restriction: This app is blocked in your country (${geo.countryName}).`);
+      }
+      if (mode === 'signup' && isBannedCountry(dialCode, selectedCountryName)) {
+        throw new Error(`Compliance Restriction: This app is blocked in your selected country (${selectedCountryName}).`);
+      }
+
       if (method === 'phone') {
         // Verification validation
         if (otpCode.trim() !== '123456') {
@@ -320,6 +369,11 @@ export default function LinkedInLogin({ onSuccess, onShowFaq }: LinkedInLoginPro
           // Sign Up with Phone
           if (!agreeTerms) {
             throw new Error('Please agree to our terms of use to complete registration.');
+          }
+          const combinedPhoneText = `${firstName} ${lastName}`.toLowerCase();
+          const forbiddenInSignup = ['admin', 'administrator', 'moderator', 'support', 'system', 'staff', 'owner', 'vip', 'member', 'team member', 'st_exact', 'st_probe', 'st exact', 'st probe'];
+          if (forbiddenInSignup.some(word => combinedPhoneText.includes(word))) {
+            throw new Error("Registration error: You cannot use reserved keywords (such as Admin, Moderator, VIP, Member, st_exact, st_probe) in your name, email, or credentials.");
           }
           if (containsProhibitedWords(firstName) || containsProhibitedWords(lastName)) {
             throw new Error('Registration blocked: Inputs contain prohibited words or spam markers.');
@@ -343,7 +397,11 @@ export default function LinkedInLogin({ onSuccess, onShowFaq }: LinkedInLoginPro
           await updateProfile(user, { displayName: fullName });
 
           const cleanBase = `${firstName.trim().toLowerCase()}${lastName.trim().toLowerCase()}`.replace(/[^a-z0-9]/g, '');
-          const autoUsername = cleanBase || `user_${user.uid.substring(0, 5)}`;
+          let autoUsername = cleanBase || `user_${user.uid.substring(0, 5)}`;
+          autoUsername = autoUsername.replace(/imchat/g, 'user');
+          if (autoUsername.includes('imchat')) {
+            autoUsername = `user_${Math.floor(1000 + Math.random() * 9000)}`;
+          }
 
           await setDoc(doc(db, "users", user.uid), {
             name: firstName.trim(),
@@ -406,11 +464,20 @@ export default function LinkedInLogin({ onSuccess, onShowFaq }: LinkedInLoginPro
           if (!firstName.trim() || !lastName.trim()) {
             throw new Error('Please enter both your first and last name.');
           }
+          const combinedSignupText = `${firstName} ${lastName} ${email} ${phoneNumber}`.toLowerCase();
+          const forbiddenInSignup = ['admin', 'administrator', 'moderator', 'support', 'system', 'staff', 'owner', 'vip', 'member', 'team member', 'st_exact', 'st_probe', 'st exact', 'st probe'];
+          if (forbiddenInSignup.some(word => combinedSignupText.includes(word))) {
+            throw new Error("Registration error: You cannot use reserved keywords (such as Admin, Moderator, VIP, Member, st_exact, st_probe) in your name, email, or credentials.");
+          }
           if (containsProhibitedWords(firstName) || containsProhibitedWords(lastName) || containsProhibitedWords(email) || containsProhibitedWords(phoneNumber)) {
             throw new Error('Registration blocked: Inputs contain prohibited words or spam markers.');
           }
           if (!email.trim() || !email.includes('@')) {
             throw new Error('Please enter a valid email address.');
+          }
+          const emailLower = email.trim().toLowerCase();
+          if (emailLower.endsWith('imchat.im') || emailLower.split('@')[1] === 'imchat.im') {
+            throw new Error("Registration error: The domain 'imchat.im' or '@imchat.im' is blacklisted.");
           }
           if (password.length < 6) {
             throw new Error('Password must be at least 6 characters long.');
@@ -430,7 +497,12 @@ export default function LinkedInLogin({ onSuccess, onShowFaq }: LinkedInLoginPro
           await updateProfile(user, { displayName: fullName });
 
           const cleanBase = `${firstName.trim().toLowerCase()}${lastName.trim().toLowerCase()}`.replace(/[^a-z0-9]/g, '');
-          const autoUsername = cleanBase || `user_${user.uid.substring(0, 5)}`;
+          let autoUsername = cleanBase || `user_${user.uid.substring(0, 5)}`;
+          // Sanitize autoUsername so it doesn't contain 'imchat'
+          autoUsername = autoUsername.replace(/imchat/g, 'user');
+          if (autoUsername.includes('imchat')) {
+            autoUsername = `user_${Math.floor(1000 + Math.random() * 9000)}`;
+          }
           
           await setDoc(doc(db, "users", user.uid), {
             name: firstName.trim(),
@@ -454,14 +526,35 @@ export default function LinkedInLogin({ onSuccess, onShowFaq }: LinkedInLoginPro
 
         } else {
           // Login Flow
-          if (!email.trim()) {
-            throw new Error('Please enter your email address.');
+          const loginInput = email.trim();
+          if (!loginInput) {
+            throw new Error('Please enter your email or username.');
           }
           if (!password) {
             throw new Error('Please enter your password.');
           }
 
-          await signInWithEmailAndPassword(auth, email.trim(), password);
+          let emailToUse = loginInput;
+
+          // If the input doesn't look like an email, assume it's a username and look it up
+          if (!loginInput.includes('@')) {
+            const usersRef = collection(db, 'users');
+            const q = query(usersRef, where('username', '==', loginInput.toLowerCase()));
+            const querySnapshot = await getDocs(q);
+            
+            if (!querySnapshot.empty) {
+              // Found a matching username, use its email
+              const userData = querySnapshot.docs[0].data();
+              if (userData.email) {
+                emailToUse = userData.email;
+              }
+            } else {
+              // Not found by username, let it fail natively or throw early
+              throw new Error('Invalid email, username, or password combination.');
+            }
+          }
+
+          await signInWithEmailAndPassword(auth, emailToUse, password);
           setSuccessMsg('Signed in successfully! Launching...');
           setTimeout(() => onSuccess(), 1200);
         }
@@ -629,15 +722,15 @@ export default function LinkedInLogin({ onSuccess, onShowFaq }: LinkedInLoginPro
 
               <div className="space-y-1.5">
                 <label htmlFor="email_address" className="text-xs font-bold text-slate-700 uppercase tracking-wide block">
-                  Email address
+                  {mode === 'login' ? 'Email address or username' : 'Email address'}
                 </label>
                 <input
                   id="email_address"
-                  type="email"
+                  type={mode === 'login' ? 'text' : 'email'}
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   className="w-full px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl focus:border-[#1da1f2] focus:ring-1 focus:ring-[#1da1f2] outline-none text-sm text-slate-900 placeholder-slate-400 transition-all font-medium"
-                  placeholder="Email"
+                  placeholder={mode === 'login' ? "Email or username" : "Email"}
                   disabled={loading}
                   required
                 />
