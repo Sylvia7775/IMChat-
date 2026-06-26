@@ -11,9 +11,10 @@ import { collection, query, limit, onSnapshot } from 'firebase/firestore';
 
 interface VoiceRecorderCaptureProps {
   onClose: () => void;
+  onImportToAiMusic?: (audioData: { url: string; blob: Blob; duration: number }) => void;
 }
 
-export default function VoiceRecorderCapture({ onClose }: VoiceRecorderCaptureProps) {
+export default function VoiceRecorderCapture({ onClose, onImportToAiMusic }: VoiceRecorderCaptureProps) {
   const [isRecording, setIsRecording] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
@@ -743,6 +744,20 @@ export default function VoiceRecorderCapture({ onClose }: VoiceRecorderCapturePr
           >
             Cancelar
           </button>
+          
+          {audioUrl && onImportToAiMusic && (
+            <button
+              type="button"
+              onClick={() => {
+                if (audioBlob) {
+                  onImportToAiMusic({ url: audioUrl, blob: audioBlob, duration: recordingTime });
+                }
+              }}
+              className="px-4 py-2.5 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-black text-xs uppercase tracking-wider rounded-xl transition-all shadow-md active:scale-95 flex items-center gap-1.5"
+            >
+              <span>Import to AI Music 🎵</span>
+            </button>
+          )}
           
           <button 
             type="button"

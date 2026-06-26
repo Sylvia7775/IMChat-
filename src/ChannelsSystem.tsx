@@ -258,6 +258,63 @@ export default function ChannelsSystem({ currentUserId, currentUserName }: Chann
             )}
             <input type="file" ref={fileInputRef} onChange={handleImageUpload} accept="image/*" className="hidden" />
           </div>
+
+          {/* URL Fast Upload Input for Channels */}
+          <div className="bg-gray-50 p-3.5 rounded-xl border border-gray-200 flex flex-col gap-2.5">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Fast Upload via URL / Pegar URL de Imagen</span>
+              {channelForm.coverUrl && (
+                <button 
+                  type="button" 
+                  onClick={() => { setChannelForm(prev => ({ ...prev, coverUrl: '' })); setCoverFile(null); }}
+                  className="text-[10px] text-red-500 font-bold hover:underline"
+                >
+                  Clear Cover
+                </button>
+              )}
+            </div>
+            
+            <input 
+              type="text" 
+              placeholder="https://images.unsplash.com/photo-..." 
+              value={channelForm.coverUrl.startsWith('blob:') ? '' : channelForm.coverUrl}
+              onChange={e => {
+                const val = e.target.value.trim();
+                setChannelForm(prev => ({ ...prev, coverUrl: val }));
+                setCoverFile(null); // Clear file when URL is used
+              }}
+              className="w-full text-xs px-3 py-2 bg-white border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all font-sans"
+            />
+
+            {/* Preset URL Fast Options */}
+            <div className="flex flex-col gap-1.5 font-sans">
+              <span className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">Fast URL Presets (Click to instantly upload):</span>
+              <div className="grid grid-cols-4 gap-1.5">
+                {[
+                  { name: 'Tech', url: 'https://images.unsplash.com/photo-1517694712202-14dd9538aa97?w=600&auto=format&fit=crop' },
+                  { name: 'Creative', url: 'https://images.unsplash.com/photo-1513364776144-60967b0f800f?w=600&auto=format&fit=crop' },
+                  { name: 'Music', url: 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=600&auto=format&fit=crop' },
+                  { name: 'Team', url: 'https://images.unsplash.com/photo-1522071820081-009f0129c71c?w=600&auto=format&fit=crop' }
+                ].map((preset) => (
+                  <button
+                    key={preset.name}
+                    type="button"
+                    onClick={() => {
+                      setChannelForm(prev => ({ ...prev, coverUrl: preset.url }));
+                      setCoverFile(null);
+                    }}
+                    className={`py-1 px-2 border rounded-md text-[10px] font-bold transition-all truncate text-center ${
+                      channelForm.coverUrl === preset.url 
+                        ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm' 
+                        : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-100'
+                    }`}
+                  >
+                    {preset.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
         </div>
 
         <div className="flex flex-col gap-2">

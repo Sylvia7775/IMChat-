@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { 
   Users, Plus, Search, Shield, Image as ImageIcon, ChevronRight, Hash, 
   MessageCircle, MoreVertical, X, Phone, Video, Edit2, Trash2, UserPlus, Ban, ArrowLeft,
-  Smile, Star, BadgeCheck, Loader2, Clock, ListOrdered, ZoomIn, Download, Radio, Music, Play, Filter, Send
+  Smile, Star, BadgeCheck, Loader2, Clock, ListOrdered, ZoomIn, Download, Radio, Music, Play, Filter, Send, Camera
 } from 'lucide-react';
 import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch';
 import GiphyPicker from './components/GiphyPicker';
@@ -11,6 +11,8 @@ import UserAvatar from './components/UserAvatar';
 
 import { GroupStore, Group, GroupMember, GroupPost, GroupRole } from './lib/GroupStore';
 import { uploadToCloudinary } from './lib/cloudinary';
+import { db } from './firebase';
+import { collection, getDocs } from 'firebase/firestore';
 
 const BusinessStore = {
   logAdClick: (id: string) => console.log('ad click', id)
@@ -96,9 +98,207 @@ interface GroupsSystemProps {
   currentUserId: string;
   currentUserName: string;
   profileImg: string;
+  followingState?: Record<string, boolean>;
+  onToggleFollow?: (userId: string) => void;
 }
 
-export default function GroupsSystem({ currentUserId, currentUserName, profileImg }: GroupsSystemProps) {
+export default function GroupsSystem({ 
+  currentUserId, 
+  currentUserName, 
+  profileImg,
+  followingState = {},
+  onToggleFollow
+}: GroupsSystemProps) {
+  const [generalUsers, setGeneralUsers] = useState<any[]>([]);
+  useEffect(() => {
+    const fetchGeneralUsers = async () => {
+      try {
+        const snap = await getDocs(collection(db, "users"));
+        const list: any[] = [];
+        snap.forEach((doc: any) => {
+          if (doc.id !== currentUserId) {
+            list.push({ id: doc.id, ...doc.data() });
+          }
+        });
+        setGeneralUsers(list);
+      } catch (e) {
+        console.warn("Failed to load users for group suggestions", e);
+      }
+    };
+    fetchGeneralUsers();
+  }, [currentUserId]);
+
+  const [screenshotPreview, setScreenshotPreview] = useState<string | null>(null);
+  const [showScreenshotModal, setShowScreenshotModal] = useState(false);
+  const [isCapturing, setIsCapturing] = useState(false);
+
+  const handleTakeScreenshot = () => {
+    if (!activeGroup) return;
+    setIsCapturing(true);
+
+    // Play visual shutter flash
+    const flashEl = document.createElement('div');
+    flashEl.className = 'fixed inset-0 bg-white z-[9999] pointer-events-none transition-opacity duration-300 opacity-100';
+    document.body.appendChild(flashEl);
+    setTimeout(() => {
+      flashEl.style.opacity = '0';
+      setTimeout(() => flashEl.remove(), 300);
+    }, 50);
+
+    // Try to draw the conversation onto Canvas
+    try {
+      const canvas = document.createElement('canvas');
+      canvas.width = 750;
+      canvas.height = 1100;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        // Draw elegant dark-slate gradient background
+        const grad = ctx.createLinearGradient(0, 0, 0, 1100);
+        grad.addColorStop(0, '#0F172A'); // Slate 900
+        grad.addColorStop(1, '#1E293B'); // Slate 800
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, 750, 1100);
+
+        // Draw upper glassmorphic phone header bar
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.08)';
+        ctx.fillRect(0, 0, 750, 130);
+        
+        // Draw top phone status icons (time, wifi, battery)
+        ctx.fillStyle = '#94A3B8';
+        ctx.font = 'bold 16px sans-serif';
+        ctx.fillText('09:41 AM', 45, 35);
+        ctx.fillText('📶 🔋 100%', 650, 35);
+
+        // Draw Group Title and Details
+        ctx.fillStyle = '#FFFFFF';
+        ctx.font = 'bold 24px sans-serif';
+        ctx.fillText(activeGroup.title || 'IMChat Group', 110, 85);
+        
+        ctx.fillStyle = '#38BDF8'; // cyan-400
+        ctx.font = 'bold 14px sans-serif';
+        ctx.fillText(`${activeGroup.members.length} Active Members • Secure Conversation`, 110, 110);
+
+        // Draw visual group avatar circle
+        ctx.fillStyle = '#0284C7'; // sky-600
+        ctx.beginPath();
+        ctx.arc(60, 90, 30, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = '#FFFFFF';
+        ctx.font = 'bold 22px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(getGroupInitials(activeGroup.title), 60, 98);
+        ctx.textAlign = 'left'; // reset
+
+        // Get recent group posts
+        const activePosts = (activeGroup.posts || []).slice(0, 4);
+        let startY = 190;
+
+        if (activePosts.length === 0) {
+          ctx.fillStyle = '#94A3B8';
+          ctx.font = 'italic 18px sans-serif';
+          ctx.fillText('No posts in this conversation yet.', 60, startY + 100);
+        } else {
+          activePosts.forEach((post, pIdx) => {
+            // Draw message bubble card background
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.05)';
+            ctx.beginPath();
+            ctx.roundRect(40, startY, 670, 175, 16);
+            ctx.fill();
+
+            // Author name and badge
+            ctx.fillStyle = '#38BDF8';
+            ctx.font = 'bold 16px sans-serif';
+            ctx.fillText(post.authorName || 'Member', 60, startY + 40);
+
+            // Post content text wrapped safely
+            ctx.fillStyle = '#E2E8F0';
+            ctx.font = '16px sans-serif';
+            const postText = post.content || 'Shared a media link';
+            // Wrap text helper
+            const words = postText.split(' ');
+            let line = '';
+            let lineY = startY + 75;
+            for (let n = 0; n < words.length; n++) {
+              let testLine = line + words[n] + ' ';
+              let metrics = ctx.measureText(testLine);
+              if (metrics.width > 550 && n > 0) {
+                ctx.fillText(line, 60, lineY);
+                line = words[n] + ' ';
+                lineY += 25;
+              } else {
+                line = testLine;
+              }
+            }
+            ctx.fillText(line, 60, lineY);
+
+            // Draw timestamp
+            ctx.fillStyle = '#64748B';
+            ctx.font = '12px sans-serif';
+            ctx.fillText(new Date(post.timestamp).toLocaleString(), 60, startY + 145);
+
+            // Visual attachment indicator if exists
+            if (post.mediaUrl) {
+              ctx.fillStyle = '#10B981';
+              ctx.font = 'bold 12px sans-serif';
+              ctx.fillText('📎 Media Attachment Attached', 530, startY + 145);
+            }
+
+            startY += 205;
+          });
+        }
+
+        // Draw styled watermark at the bottom of the screenshot
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
+        ctx.fillRect(0, 1010, 750, 90);
+
+        ctx.fillStyle = '#FFFFFF';
+        ctx.font = 'bold 18px sans-serif';
+        ctx.fillText('IMChat Secure Conversation App', 50, 1050);
+
+        ctx.fillStyle = '#94A3B8';
+        ctx.font = '13px sans-serif';
+        ctx.fillText('Encrypted • Verified Screenshot', 50, 1075);
+
+        ctx.fillStyle = '#64748B';
+        ctx.font = 'bold 14px sans-serif';
+        ctx.fillText('DOWNLOADED VIA IMCHAT PREVIEWS', 480, 1060);
+
+        const dataUrl = canvas.toDataURL('image/png');
+        setScreenshotPreview(dataUrl);
+        setShowScreenshotModal(true);
+      }
+    } catch (err) {
+      console.error("Screenshot capture failed:", err);
+    } finally {
+      setIsCapturing(false);
+    }
+  };
+
+  const getGroupFollowSuggestions = () => {
+    const memberSuggestions = (activeGroup?.members || [])
+      .filter(m => m.userId !== currentUserId)
+      .map(m => ({
+        id: m.userId,
+        name: m.name,
+        avatar: m.avatar,
+        isVerified: false,
+        bio: 'Group Member'
+      }));
+
+    const fallbackSuggestions = [
+      { id: 'user_dan_abramov', name: 'Dan Abramov', avatar: 'https://api.dicebear.com/7.x/adventurer/svg?seed=Dan', isVerified: true, bio: 'React Core Developer' },
+      { id: 'user_alex_river', name: 'AlexRiver', avatar: 'https://api.dicebear.com/7.x/adventurer/svg?seed=Alex', isVerified: false, bio: 'Digital Creator' },
+      { id: 'user_nature_walks', name: 'NatureWalks', avatar: 'https://api.dicebear.com/7.x/adventurer/svg?seed=Nature', isVerified: false, bio: 'Outdoor enthusiast' },
+      { id: 'user_sophie_dev', name: 'Sophie_Dev', avatar: 'https://api.dicebear.com/7.x/adventurer/svg?seed=Sophie', isVerified: true, bio: 'Tech Lead • open source contributor' },
+      { id: 'user_cyber_nomad', name: 'CyberNomad', avatar: 'https://api.dicebear.com/7.x/adventurer/svg?seed=Cyber', isVerified: false, bio: 'Vibe designer & indie hacker' }
+    ];
+
+    const combined = [...memberSuggestions, ...generalUsers, ...fallbackSuggestions];
+    const unique = combined.filter((item, index, self) => self.findIndex(t => t.id === item.id) === index);
+    return unique.filter(u => u.id !== currentUserId && !followingState[u.id]).slice(0, 5);
+  };
+
   const [groups, setGroups] = useState<Group[]>([]);
   const [listSubTab, setListSubTab] = useState<'explore' | 'activity'>('explore');
   const [activeGroupId, setActiveGroupId] = useState<string | null>(() => {
@@ -502,7 +702,64 @@ export default function GroupsSystem({ currentUserId, currentUserName, profileIm
                   <ImageIcon className="w-4 h-4 text-white animate-pulse" /> Cargar Portada / Upload Cover
                </label>
              </div>
-           </div>
+
+             {/* URL Fast Upload Input */}
+             <div className="bg-white p-3.5 rounded-xl border border-gray-200 shadow-sm flex flex-col gap-2.5 mt-1">
+               <div className="flex items-center justify-between">
+                 <span className="text-[10px] font-extrabold text-gray-500 uppercase tracking-wider">Fast Upload via URL / Pegar URL de Imagen</span>
+                 {cgCover && (
+                   <button 
+                     type="button" 
+                     onClick={() => { setCgCover(''); setCgCoverFile(null); }}
+                     className="text-[10px] text-red-500 font-bold hover:underline"
+                   >
+                     Clear Cover
+                   </button>
+                 )}
+               </div>
+               
+               <input 
+                 type="text" 
+                 placeholder="https://images.unsplash.com/photo-..." 
+                 value={cgCover.startsWith('blob:') ? '' : cgCover}
+                 onChange={e => {
+                   const val = e.target.value.trim();
+                   setCgCover(val);
+                   setCgCoverFile(null); // Clear file when URL is used
+                 }}
+                 className="w-full text-xs px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg outline-none focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all font-sans"
+               />
+
+               {/* Preset URL Fast Options */}
+               <div className="flex flex-col gap-1.5">
+                 <span className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">Fast URL Presets (Click to instantly upload):</span>
+                 <div className="grid grid-cols-4 gap-1.5">
+                   {[
+                     { name: 'Tech', url: 'https://images.unsplash.com/photo-1517694712202-14dd9538aa97?w=600&auto=format&fit=crop' },
+                     { name: 'Creative', url: 'https://images.unsplash.com/photo-1513364776144-60967b0f800f?w=600&auto=format&fit=crop' },
+                     { name: 'Music', url: 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=600&auto=format&fit=crop' },
+                     { name: 'Team', url: 'https://images.unsplash.com/photo-1522071820081-009f0129c71c?w=600&auto=format&fit=crop' }
+                   ].map((preset) => (
+                     <button
+                       key={preset.name}
+                       type="button"
+                       onClick={() => {
+                         setCgCover(preset.url);
+                         setCgCoverFile(null);
+                       }}
+                       className={`py-1 px-2 border rounded-md text-[10px] font-bold transition-all truncate text-center ${
+                         cgCover === preset.url 
+                           ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm' 
+                           : 'bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100'
+                       }`}
+                     >
+                       {preset.name}
+                     </button>
+                   ))}
+                 </div>
+               </div>
+             </div>
+            </div>
 
            <div className="flex flex-col gap-2">
              <label className="text-[11px] font-bold text-gray-400 uppercase tracking-wider px-1">Nombre del Grupo / Group Title</label>
@@ -579,8 +836,15 @@ export default function GroupsSystem({ currentUserId, currentUserName, profileIm
       <div className="flex flex-col h-full bg-gray-50 absolute inset-0 z-40 overflow-hidden">
         <header className="absolute top-0 left-0 right-0 z-20 flex justify-between p-4 bg-gradient-to-b from-black/60 to-transparent">
           <button onClick={() => { setActiveGroupId(null); setView('list'); }} className="p-2 bg-white/20 backdrop-blur-md rounded-full text-white hover:bg-white/30 active:scale-95"><X className="w-5 h-5"/></button>
-          {isMember && (
+           {isMember && (
             <div className="flex gap-2">
+              <button 
+                onClick={handleTakeScreenshot}
+                className="p-2 bg-white/20 backdrop-blur-md rounded-full text-white hover:bg-white/30 active:scale-95 flex items-center justify-center relative transition-all"
+                title="Take Conversation Screenshot"
+              >
+                <Camera className="w-5 h-5"/>
+              </button>
               <button 
                 onClick={() => {
                   const input = document.getElementById('group-post-input');
@@ -1074,10 +1338,54 @@ export default function GroupsSystem({ currentUserId, currentUserName, profileIm
           </div>
             </>
           ) : (
-             <div className="p-10 flex flex-col items-center text-gray-400 text-center">
+             <div className="p-10 flex flex-col items-center text-gray-400 text-center w-full">
                <Shield className="w-12 h-12 mb-3 opacity-20" />
-               <p className="font-bold text-sm">Members Only</p>
-               <p className="text-xs max-w-[200px] mt-1">You need to join this group to view its feed and gallery.</p>
+               <p className="font-bold text-sm text-slate-800">Members Only</p>
+               <p className="text-xs max-w-[200px] mt-1 text-slate-500">You need to join this group to view its feed and gallery.</p>
+
+               {/* Instagram Style Follow Suggestions before joining */}
+               {(() => {
+                 const suggestions = getGroupFollowSuggestions();
+                 if (suggestions.length === 0) return null;
+
+                 return (
+                   <div className="mt-8 w-full max-w-sm bg-white border border-gray-150 rounded-2xl p-4 shadow-sm text-left">
+                     <p className="font-extrabold text-[13px] text-gray-800 mb-3 border-b border-gray-100 pb-2 flex items-center gap-1.5">
+                       ✨ Suggested Creators to Follow
+                     </p>
+                     <div className="space-y-3.5">
+                       {suggestions.map((u) => {
+                         const isFollowing = followingState[u.id];
+                         return (
+                           <div key={u.id} className="flex items-center justify-between gap-3">
+                             <div className="flex items-center gap-2.5 min-w-0">
+                               <UserAvatar src={u.avatar} name={u.name} size="sm" className="border ring-1 ring-gray-100" />
+                               <div className="flex flex-col min-w-0">
+                                 <span className="font-extrabold text-xs text-gray-900 truncate flex items-center gap-1">
+                                   {u.name}
+                                   {u.isVerified && <BadgeCheck className="w-3.5 h-3.5 text-white fill-[#0095f6] shrink-0" />}
+                                 </span>
+                                 <span className="text-[10px] text-gray-400 font-semibold truncate leading-tight">{u.bio || 'Suggested for you'}</span>
+                               </div>
+                             </div>
+
+                             <button
+                               onClick={() => onToggleFollow?.(u.id)}
+                               className={`px-3 py-1.5 rounded-lg text-[11px] font-black transition-all active:scale-95 ${
+                                 isFollowing 
+                                   ? 'bg-gray-100 text-gray-500 hover:bg-gray-200' 
+                                   : 'bg-brand-blue text-white hover:bg-blue-600 shadow-sm'
+                               }`}
+                             >
+                               {isFollowing ? 'Following' : 'Follow'}
+                             </button>
+                           </div>
+                         );
+                       })}
+                     </div>
+                   </div>
+                 );
+               })()}
              </div>
           )}
         </div>
@@ -1396,6 +1704,63 @@ export default function GroupsSystem({ currentUserId, currentUserName, profileIm
                          />
                          <ImageIcon className="w-3.5 h-3.5 text-white" /> Sustituir Portada / Change Cover
                       </label>
+                    </div>
+
+                    {/* URL Fast Upload Input for Editing */}
+                    <div className="bg-gray-50 p-3 rounded-xl border border-gray-200 flex flex-col gap-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[9px] font-black tracking-widest text-gray-500 uppercase">Sustituir vía URL / Paste Cover URL</span>
+                        {editGroupCover && (
+                          <button 
+                            type="button" 
+                            onClick={() => { setEditGroupCover(''); setEditGroupCoverFile(null); }}
+                            className="text-[9px] text-red-500 font-bold hover:underline"
+                          >
+                            Clear
+                          </button>
+                        )}
+                      </div>
+                      
+                      <input 
+                        type="text" 
+                        placeholder="https://images.unsplash.com/photo-..." 
+                        value={editGroupCover.startsWith('blob:') ? '' : editGroupCover}
+                        onChange={e => {
+                          const val = e.target.value.trim();
+                          setEditGroupCover(val);
+                          setEditGroupCoverFile(null); // Clear file when URL is used
+                        }}
+                        className="w-full text-xs px-2.5 py-1.5 bg-white border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all font-sans"
+                      />
+
+                      {/* Fast URL Presets */}
+                      <div className="flex gap-1.5 items-center justify-between font-sans">
+                        <span className="text-[8px] font-bold text-gray-400 uppercase tracking-wider">Fast Presets:</span>
+                        <div className="flex gap-1">
+                          {[
+                            { name: 'Tech', url: 'https://images.unsplash.com/photo-1517694712202-14dd9538aa97?w=600&auto=format&fit=crop' },
+                            { name: 'Creative', url: 'https://images.unsplash.com/photo-1513364776144-60967b0f800f?w=600&auto=format&fit=crop' },
+                            { name: 'Music', url: 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=600&auto=format&fit=crop' },
+                            { name: 'Team', url: 'https://images.unsplash.com/photo-1522071820081-009f0129c71c?w=600&auto=format&fit=crop' }
+                          ].map((preset) => (
+                            <button
+                              key={preset.name}
+                              type="button"
+                              onClick={() => {
+                                setEditGroupCover(preset.url);
+                                setEditGroupCoverFile(null);
+                              }}
+                              className={`py-0.5 px-1.5 border rounded text-[9px] font-bold transition-all ${
+                                editGroupCover === preset.url 
+                                  ? 'bg-indigo-600 text-white border-indigo-600' 
+                                  : 'bg-white text-gray-500 border-gray-200 hover:bg-gray-100'
+                              }`}
+                            >
+                              {preset.name}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -1742,6 +2107,62 @@ export default function GroupsSystem({ currentUserId, currentUserName, profileIm
           </div>
         </div>
       )}
+
+      {/* Captured Screenshot Preview Drawer / Modal */}
+      <AnimatePresence>
+        {showScreenshotModal && screenshotPreview && (
+          <div className="fixed inset-0 z-[250] bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9, y: 30 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 30 }}
+              className="bg-slate-900 border border-slate-800 w-full max-w-md rounded-2xl shadow-2xl flex flex-col overflow-hidden max-h-[90vh]"
+            >
+              <header className="px-5 py-4 border-b border-slate-800 flex items-center justify-between text-white">
+                <div>
+                  <h3 className="font-extrabold text-sm flex items-center gap-2">
+                    <Camera className="w-5 h-5 text-sky-400" />
+                    <span>Conversation Screenshot</span>
+                  </h3>
+                  <p className="text-[10px] text-slate-400 mt-0.5">High-fidelity secure chat capture ready</p>
+                </div>
+                <button 
+                  onClick={() => { setShowScreenshotModal(false); setScreenshotPreview(null); }}
+                  className="p-1.5 hover:bg-slate-800 text-slate-400 hover:text-white rounded-full transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </header>
+
+              <div className="flex-1 overflow-y-auto p-5 flex flex-col items-center justify-center">
+                <div className="border border-slate-700/50 rounded-xl overflow-hidden shadow-2xl max-w-full bg-slate-950">
+                  <img src={screenshotPreview} className="max-h-[50vh] object-contain" alt="Screenshot Preview" />
+                </div>
+                <p className="text-[11px] text-slate-400 font-medium text-center mt-3 max-w-[280px]">
+                  This secure screenshot captures the active group conversation, including names and times.
+                </p>
+              </div>
+
+              <footer className="p-4 border-t border-slate-800 bg-slate-950 flex gap-3">
+                <button
+                  onClick={() => { setShowScreenshotModal(false); setScreenshotPreview(null); }}
+                  className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-extrabold text-[13px] rounded-xl transition-all"
+                >
+                  Cancel
+                </button>
+                <a
+                  href={screenshotPreview}
+                  download={`imchat_group_screenshot_${activeGroup?.title?.toLowerCase().replace(/\s+/g, '_') || 'chat'}.png`}
+                  className="flex-1 py-2.5 bg-sky-500 hover:bg-sky-600 active:scale-95 text-white font-extrabold text-[13px] rounded-xl flex items-center justify-center gap-1.5 transition-all shadow-md shadow-sky-500/10 text-center"
+                >
+                  <Download className="w-4 h-4" />
+                  <span>Download Image</span>
+                </a>
+              </footer>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
     </div>
   );

@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Heart, MessageCircle, Send, MoreVertical, Music, Upload, PlaySquare, BadgeCheck, Layers, Loader2, Sparkles, Smile, Volume2, VolumeX, Check, Sliders, BarChart3, Zap, Activity, TrendingUp, X, Sparkle, Globe, PieChart, HelpCircle, FileText, Plus, Flag, AlertTriangle, Share2, Trash2 } from 'lucide-react';
+import { Heart, MessageCircle, Send, MoreVertical, Music, Upload, PlaySquare, BadgeCheck, Layers, Loader2, Sparkles, Smile, Volume2, VolumeX, Check, Sliders, BarChart3, Zap, Activity, TrendingUp, X, Sparkle, Globe, PieChart, HelpCircle, FileText, Plus, Flag, AlertTriangle, Share2, Trash2, Radio } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { ReelStore, Reel as ReelType } from './lib/ReelStore';
 import { auth, db } from './firebase';
@@ -1624,11 +1624,185 @@ function Reel({
   const [isPlaying, setIsPlaying] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [cachedUrl, setCachedUrl] = useState<string | null>(null);
+  const [isLiked, setIsLiked] = useState(false);
+  const [likesCount, setLikesCount] = useState<number>(() => {
+    const parsed = parseInt(String(data.likes), 10);
+    return isNaN(parsed) ? 142 : parsed; // standard fallback
+  });
 
   const [showComments, setShowComments] = useState(false);
   const [comments, setComments] = useState<ReelComment[]>([]);
   const [newCommentText, setNewCommentText] = useState('');
   const [replyingTo, setReplyingTo] = useState<ReelComment | null>(null);
+
+  // Audio Mixer State
+  const [showAudioMixer, setShowAudioMixer] = useState(false);
+  const [videoVolume, setVideoVolume] = useState(100);
+  const [bgMusicTrack, setBgMusicTrack] = useState('none');
+  const [bgMusicVolume, setBgMusicVolume] = useState(50);
+  const [sfxVolume, setSfxVolume] = useState(50);
+
+  // Background Music loops synthesizer refs
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const bgMusicNodeRef = useRef<OscillatorNode | null>(null);
+  const bgGainNodeRef = useRef<GainNode | null>(null);
+
+  // Sync Video volume to slider
+  useEffect(() => {
+    if (videoRef.current) {
+      videoRef.current.volume = videoVolume / 100;
+    }
+  }, [videoVolume]);
+
+  // Sound effects synthesizer function
+  const triggerSynthesizedSfx = (type: string) => {
+    try {
+      const ctx = audioCtxRef.current || new (window.AudioContext || (window as any).webkitAudioContext)();
+      if (!audioCtxRef.current) audioCtxRef.current = ctx;
+
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      const vol = sfxVolume / 100;
+      gain.gain.setValueAtTime(vol * 0.4, ctx.currentTime);
+
+      if (type === 'airhorn') {
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(440, ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.15);
+        osc.frequency.setValueAtTime(660, ctx.currentTime + 0.15);
+        gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.5);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.5);
+      } else if (type === 'laughter') {
+        osc.type = 'sine';
+        let t = ctx.currentTime;
+        osc.start(t);
+        for (let i = 0; i < 6; i++) {
+          osc.frequency.setValueAtTime(250 + Math.sin(i) * 50, t);
+          gain.gain.setValueAtTime(vol * 0.3, t);
+          gain.gain.exponentialRampToValueAtTime(0.01, t + 0.08);
+          t += 0.12;
+        }
+        osc.stop(t);
+      } else if (type === 'applause') {
+        osc.type = 'triangle';
+        let t = ctx.currentTime;
+        osc.start(t);
+        for (let i = 0; i < 20; i++) {
+          osc.frequency.setValueAtTime(100 + Math.random() * 400, t);
+          gain.gain.setValueAtTime(vol * 0.25, t);
+          gain.gain.exponentialRampToValueAtTime(0.01, t + 0.05);
+          t += 0.04;
+        }
+        osc.stop(t);
+      } else if (type === 'scratch') {
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(150, ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(1200, ctx.currentTime + 0.12);
+        osc.frequency.exponentialRampToValueAtTime(80, ctx.currentTime + 0.25);
+        gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.25);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.25);
+      } else if (type === 'cheers') {
+        osc.type = 'square';
+        osc.frequency.setValueAtTime(523.25, ctx.currentTime);
+        osc.frequency.setValueAtTime(659.25, ctx.currentTime + 0.1);
+        osc.frequency.setValueAtTime(783.99, ctx.currentTime + 0.2);
+        osc.frequency.setValueAtTime(1046.50, ctx.currentTime + 0.3);
+        gain.gain.setValueAtTime(vol * 0.2, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.65);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.7);
+      }
+    } catch (e) {
+      console.warn("SFX synthesis failed", e);
+    }
+  };
+
+  // Loop player controller
+  useEffect(() => {
+    if (!isActive || !isPlaying || bgMusicTrack === 'none') {
+      if (bgMusicNodeRef.current) {
+        try { bgMusicNodeRef.current.stop(); } catch (e) {}
+        bgMusicNodeRef.current = null;
+      }
+      return;
+    }
+
+    try {
+      const ctx = audioCtxRef.current || new (window.AudioContext || (window as any).webkitAudioContext)();
+      if (!audioCtxRef.current) audioCtxRef.current = ctx;
+
+      if (ctx.state === 'suspended') {
+        ctx.resume();
+      }
+
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      if (bgMusicTrack === 'lofi') {
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(110, ctx.currentTime);
+        let t = ctx.currentTime;
+        for (let i = 0; i < 100; i++) {
+          osc.frequency.setValueAtTime(110 + (i % 2 === 0 ? 10 : 0), t);
+          t += 0.8;
+        }
+      } else if (bgMusicTrack === 'synthwave') {
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(160, ctx.currentTime);
+        let t = ctx.currentTime;
+        for (let i = 0; i < 100; i++) {
+          osc.frequency.setValueAtTime(i % 4 === 0 ? 130 : 160, t);
+          t += 0.4;
+        }
+      } else if (bgMusicTrack === 'groove') {
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(220, ctx.currentTime);
+        let t = ctx.currentTime;
+        for (let i = 0; i < 100; i++) {
+          osc.frequency.setValueAtTime(220 + (i % 3 === 0 ? 110 : -40), t);
+          t += 0.6;
+        }
+      } else if (bgMusicTrack === 'techno') {
+        osc.type = 'square';
+        osc.frequency.setValueAtTime(80, ctx.currentTime);
+        let t = ctx.currentTime;
+        for (let i = 0; i < 100; i++) {
+          osc.frequency.setValueAtTime(i % 2 === 0 ? 80 : 140, t);
+          t += 0.25;
+        }
+      }
+
+      const vol = bgMusicVolume / 100;
+      gain.gain.setValueAtTime(vol * 0.15, ctx.currentTime);
+
+      osc.start();
+      bgMusicNodeRef.current = osc;
+      bgGainNodeRef.current = gain;
+    } catch (e) {
+      console.warn("Background music play failed", e);
+    }
+
+    return () => {
+      if (bgMusicNodeRef.current) {
+        try { bgMusicNodeRef.current.stop(); } catch (e) {}
+        bgMusicNodeRef.current = null;
+      }
+    };
+  }, [isActive, isPlaying, bgMusicTrack]);
+
+  // Handle dynamic volume adjust for loop
+  useEffect(() => {
+    if (bgGainNodeRef.current && audioCtxRef.current) {
+      bgGainNodeRef.current.gain.setValueAtTime((bgMusicVolume / 100) * 0.15, audioCtxRef.current.currentTime);
+    }
+  }, [bgMusicVolume]);
 
   // Load comments
   useEffect(() => {
@@ -2497,11 +2671,39 @@ function Reel({
             animate={{ x: isActive ? 0 : 20, opacity: isActive ? 1 : 0 }}
             transition={{ type: 'spring', stiffness: 220, damping: 22, delay: 0.05 }}
           >
-            <button className="flex flex-col items-center gap-1.5 active:scale-95 transition-transform group">
-              <Heart className="text-white w-7 h-7 group-hover:text-pink-500 transition-colors" />
-              <span className="text-white text-xs font-medium">{data.likes}</span>
+            <button 
+              onClick={() => {
+                setIsLiked(!isLiked);
+                setLikesCount(prev => isLiked ? prev - 1 : prev + 1);
+              }}
+              className="flex flex-col items-center gap-1.5 active:scale-95 transition-transform group"
+            >
+              <Heart 
+                className={`w-7 h-7 transition-colors ${
+                  isLiked 
+                    ? 'fill-pink-500 text-pink-500' 
+                    : 'text-white group-hover:text-pink-500'
+                }`} 
+              />
+              <span className="text-white text-xs font-medium">{likesCount}</span>
             </button>
-            {/* Comments disabled globally on Reels */}
+            {/* Comments active button */}
+            <button 
+              onClick={() => setShowComments(true)}
+              className="flex flex-col items-center gap-1.5 active:scale-95 transition-transform group text-white"
+            >
+              <MessageCircle className="text-white w-7 h-7 group-hover:text-purple-400 transition-colors" />
+              <span className="text-white text-xs font-medium">{comments.length}</span>
+            </button>
+            {/* Background Audio Mixer button */}
+            <button 
+              onClick={() => setShowAudioMixer(true)}
+              className="flex flex-col items-center gap-1.5 active:scale-95 transition-transform group text-white"
+              title="Mixer de Audio / Audio Mixer"
+            >
+              <Radio className="text-white w-7 h-7 group-hover:text-[#00ffcc] transition-all duration-300" />
+              <span className="text-[9px] font-black uppercase tracking-wider text-white">Mixer</span>
+            </button>
             <div className="relative flex flex-col items-center">
               <AnimatePresence>
                 {copied && (
@@ -2798,6 +3000,166 @@ function Reel({
                 </form>
               </div>
 
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
+      {/* Background Music & Sound Effects Audio Mixer bottom drawer */}
+      <AnimatePresence>
+        {showAudioMixer && (
+          <>
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowAudioMixer(false)}
+              className="absolute inset-0 bg-black/60 backdrop-blur-[2px] z-45 pointer-events-auto cursor-pointer"
+            />
+
+            <motion.div
+              initial={{ y: "100%" }}
+              animate={{ y: 0 }}
+              exit={{ y: "100%" }}
+              transition={{ type: "spring", stiffness: 350, damping: 30 }}
+              className="absolute bottom-0 left-0 right-0 h-[68%] bg-slate-950 rounded-t-[32px] border-t border-slate-800/80 z-50 flex flex-col overflow-hidden pointer-events-auto shadow-2xl"
+            >
+              <div className="w-12 h-1 bg-slate-800 rounded-full mx-auto mt-3 mb-2" />
+
+              <div className="px-5 py-4 border-b border-slate-900 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="p-1.5 bg-[#00ffcc]/10 text-[#00ffcc] rounded-lg">
+                    <Radio className="w-5 h-5" />
+                  </div>
+                  <div className="text-left">
+                    <span className="text-white font-extrabold text-sm tracking-wide block">
+                      Audio Mixing Console
+                    </span>
+                    <span className="text-[10px] text-slate-400">Mix background music loops & sound effects live</span>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => setShowAudioMixer(false)}
+                  className="p-1.5 bg-slate-900/50 hover:bg-slate-900 text-slate-400 hover:text-white rounded-full transition-colors cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-5 space-y-6 scrollbar-none">
+                {/* Track Volumes */}
+                <div className="space-y-4 text-left">
+                  <h4 className="text-[#00ffcc] font-black text-[11px] uppercase tracking-wider">🎚️ Track Volumes</h4>
+                  
+                  {/* Original video slider */}
+                  <div className="bg-slate-900/40 p-3.5 rounded-2xl border border-slate-900 space-y-2">
+                    <div className="flex justify-between items-center text-xs">
+                      <span className="text-slate-300 font-bold font-sans">Original Reel Volume</span>
+                      <span className="text-[#00ffcc] font-mono font-bold">{videoVolume}%</span>
+                    </div>
+                    <input 
+                      type="range"
+                      min="0"
+                      max="100"
+                      value={videoVolume}
+                      onChange={(e) => setVideoVolume(Number(e.target.value))}
+                      className="w-full accent-[#00ffcc] cursor-pointer bg-slate-850 h-1 rounded-lg appearance-none"
+                    />
+                  </div>
+
+                  {/* Bg music volume slider (only if track !== 'none') */}
+                  {bgMusicTrack !== 'none' && (
+                    <div className="bg-slate-900/40 p-3.5 rounded-2xl border border-slate-900 space-y-2">
+                      <div className="flex justify-between items-center text-xs">
+                        <span className="text-slate-300 font-bold font-sans">Ambient Music Volume</span>
+                        <span className="text-purple-400 font-mono font-bold">{bgMusicVolume}%</span>
+                      </div>
+                      <input 
+                        type="range"
+                        min="0"
+                        max="100"
+                        value={bgMusicVolume}
+                        onChange={(e) => setBgMusicVolume(Number(e.target.value))}
+                        className="w-full accent-purple-500 cursor-pointer bg-slate-850 h-1 rounded-lg appearance-none"
+                      />
+                    </div>
+                  )}
+                </div>
+
+                {/* Ambient music track */}
+                <div className="space-y-3 text-left">
+                  <h4 className="text-[#00ffcc] font-black text-[11px] uppercase tracking-wider">🎵 Ambient Background Loops</h4>
+                  <div className="grid grid-cols-2 gap-2.5">
+                    {[
+                      { id: 'none', label: '🔇 No Music', desc: 'Original audio only' },
+                      { id: 'lofi', label: '🌸 Sunset Lo-Fi', desc: 'Chill relaxed chords' },
+                      { id: 'synthwave', label: '⚡ Synthwave', desc: 'High-energy bassline' },
+                      { id: 'groove', label: '🎸 Acoustic Groove', desc: 'Soft melodic loops' },
+                      { id: 'techno', label: '🔊 Techno Pulse', desc: 'Deep rhythmic kick' },
+                    ].map((track) => (
+                      <button
+                        key={track.id}
+                        onClick={() => setBgMusicTrack(track.id)}
+                        className={`p-3 rounded-2xl border text-left transition-all active:scale-95 flex flex-col justify-between ${
+                          bgMusicTrack === track.id
+                            ? 'bg-gradient-to-tr from-[#00ffcc]/10 to-emerald-500/10 border-[#00ffcc] text-white shadow-lg'
+                            : 'bg-slate-900/60 border-slate-850 text-slate-400 hover:border-slate-800 hover:text-slate-200'
+                        }`}
+                      >
+                        <span className="font-extrabold text-xs block">{track.label}</span>
+                        <span className="text-[9px] opacity-80 mt-1 leading-tight">{track.desc}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Sound effects board */}
+                <div className="space-y-3 text-left">
+                  <div className="flex justify-between items-center">
+                    <h4 className="text-[#00ffcc] font-black text-[11px] uppercase tracking-wider">🚨 Instant Sound Board</h4>
+                    <span className="text-[10px] text-slate-500 font-bold">SFX Vol: {sfxVolume}%</span>
+                  </div>
+                  
+                  {/* SFX volume controller */}
+                  <div className="px-1 mb-4">
+                    <input 
+                      type="range"
+                      min="0"
+                      max="100"
+                      value={sfxVolume}
+                      onChange={(e) => setSfxVolume(Number(e.target.value))}
+                      className="w-full accent-[#00ffcc] cursor-pointer bg-slate-850 h-1 rounded-lg appearance-none"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-2">
+                    {[
+                      { id: 'airhorn', label: 'Airhorn 🚨', color: 'bg-red-500/15 text-red-400 border-red-500/20' },
+                      { id: 'laughter', label: 'Laughter 😂', color: 'bg-yellow-500/15 text-yellow-400 border-yellow-500/20' },
+                      { id: 'applause', label: 'Applause 👏', color: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/20' },
+                      { id: 'scratch', label: 'Scratch 💿', color: 'bg-purple-500/15 text-purple-400 border-purple-500/20' },
+                      { id: 'cheers', label: 'Cheers 🎉', color: 'bg-sky-500/15 text-sky-400 border-sky-500/20' },
+                    ].map((sfx) => (
+                      <button
+                        key={sfx.id}
+                        onClick={() => triggerSynthesizedSfx(sfx.id)}
+                        className={`py-3 rounded-2xl border border-dashed text-center font-extrabold text-xs transition-all active:scale-90 shadow-sm ${sfx.color}`}
+                      >
+                        {sfx.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <footer className="p-4 bg-slate-950 border-t border-slate-900 flex justify-end">
+                <button
+                  onClick={() => setShowAudioMixer(false)}
+                  className="px-6 py-2.5 bg-gradient-to-r from-[#00ffcc] to-emerald-500 hover:brightness-110 active:scale-95 text-slate-950 font-black text-xs uppercase tracking-wider rounded-full transition-all cursor-pointer shadow-lg shadow-[#00ffcc]/15"
+                >
+                  Done Mixing
+                </button>
+              </footer>
             </motion.div>
           </>
         )}

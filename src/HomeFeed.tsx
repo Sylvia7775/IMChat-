@@ -173,7 +173,9 @@ export default function HomeFeed({
   profileImg = 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&q=80&w=300&h=300',
   userSettings,
   userRole = 'user',
-  onUpdateAvatar
+  onUpdateAvatar,
+  followingState = {},
+  onToggleFollow
 }: { 
   onNavigate?: (nav: string) => void, 
   onUserSelected?: (user: any) => void,
@@ -181,8 +183,41 @@ export default function HomeFeed({
   profileImg?: string,
   userSettings?: any,
   userRole?: string,
-  onUpdateAvatar?: (url: string) => Promise<void> | void
+  onUpdateAvatar?: (url: string) => Promise<void> | void,
+  followingState?: Record<string, boolean>,
+  onToggleFollow?: (userId: string) => void
 }) {
+  const [appUsers, setAppUsers] = useState<any[]>([]);
+  useEffect(() => {
+    const fetchUsers = async () => {
+      try {
+        const querySnapshot = await getDocs(collection(db, "users"));
+        const list: any[] = [];
+        querySnapshot.forEach((doc) => {
+          if (doc.id !== auth.currentUser?.uid) {
+            list.push({ id: doc.id, ...doc.data() });
+          }
+        });
+        setAppUsers(list);
+      } catch (err) {
+        console.warn("Failed to load suggested users from Firestore:", err);
+      }
+    };
+    fetchUsers();
+  }, []);
+
+  const DEFAULT_SUGGESTED = [
+    { id: 'user_dan_abramov', name: 'Dan Abramov', avatar: 'https://api.dicebear.com/7.x/adventurer/svg?seed=Dan', isVerified: true, bio: 'React core team • creator of Redux' },
+    { id: 'user_alex_river', name: 'AlexRiver', avatar: 'https://api.dicebear.com/7.x/adventurer/svg?seed=Alex', isVerified: false, bio: 'Digital nomad & landscape photographer' },
+    { id: 'user_nature_walks', name: 'NatureWalks', avatar: 'https://api.dicebear.com/7.x/adventurer/svg?seed=Nature', isVerified: false, bio: 'Curating the worlds most stunning trails' },
+    { id: 'user_sophie_dev', name: 'Sophie_Dev', avatar: 'https://api.dicebear.com/7.x/adventurer/svg?seed=Sophie', isVerified: true, bio: 'Full stack builder • TS enthusiast' },
+    { id: 'user_cyber_nomad', name: 'CyberNomad', avatar: 'https://api.dicebear.com/7.x/adventurer/svg?seed=Cyber', isVerified: false, bio: 'AI researcher and web3 engineer' }
+  ];
+
+  const finalSuggested = appUsers.length >= 3 
+    ? appUsers.slice(0, 5) 
+    : [...appUsers, ...DEFAULT_SUGGESTED].filter((item, index, self) => self.findIndex(t => t.id === item.id) === index).slice(0, 5);
+
   const currentUserId = auth.currentUser?.uid || 'anonymous';
   const currentUserName = userSettings?.name || 'User';
   const MY_AVATAR = profileImg;
@@ -1798,6 +1833,12 @@ export default function HomeFeed({
           
           feedPosts.forEach((post, index) => {
             itemsToRender.push({ type: 'post', data: post });
+            
+            // Insert inline follow suggestions in the middle of feed (after 2nd post)
+            if (index === 1) {
+              itemsToRender.push({ type: 'follow_suggestions' });
+            }
+
             // Show ad campaign every 3 items
             if ((index + 1) % 3 === 0 && activeAds.length > 0) {
               const adIndex = Math.floor((index / 3) % activeAds.length);
@@ -1805,14 +1846,65 @@ export default function HomeFeed({
             }
           });
 
-          // Fallback if empty timeline
-          if (feedPosts.length === 0 && activeAds.length > 0) {
-            activeAds.forEach(ad => itemsToRender.push({ type: 'ad', data: ad }));
+          // Fallback if empty timeline or only 1 item to ensure suggestions are shown
+          if (feedPosts.length <= 1) {
+            itemsToRender.push({ type: 'follow_suggestions' });
           }
 
           itemsToRenderRef.current = itemsToRender;
 
           return itemsToRender.map((item, idx) => {
+            if (item.type === 'follow_suggestions') {
+              const followList = finalSuggested.filter(u => !followingState[u.id] && u.id !== currentUserId);
+              if (followList.length === 0) return null;
+              
+              return (
+                <div key={`inline-follow-suggestions-${idx}`} className="bg-white border border-gray-150 sm:rounded-2xl sm:mx-2 sm:my-3 p-4 shadow-sm text-left">
+                  <div className="flex items-center justify-between mb-3 pb-1 border-b border-gray-100">
+                    <span className="font-bold text-sm text-gray-900 flex items-center gap-1.5">
+                      ✨ Suggested for you
+                    </span>
+                    <button 
+                      onClick={() => onNavigate?.('directory')}
+                      className="text-xs font-bold text-brand-blue hover:text-blue-700 transition-colors"
+                    >
+                      See All
+                    </button>
+                  </div>
+                  
+                  {/* Horizontal Scroll Carousel */}
+                  <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-none select-none">
+                    {followList.slice(0, 5).map((u) => (
+                      <div key={u.id} className="min-w-[140px] max-w-[140px] bg-gray-50/50 border border-gray-150 rounded-2xl p-3 flex flex-col items-center text-center relative hover:shadow-sm transition-all">
+                        <UserAvatar src={u.avatar} name={u.name} size="md" className="border-2 border-white ring-1 ring-gray-150" />
+                        <div className="flex items-center gap-1 mt-2 min-w-0 w-full justify-center">
+                          <span 
+                            onClick={() => {
+                              if (onUserSelected) {
+                                onUserSelected({ id: u.id, name: u.name, avatar: u.avatar, isVerified: u.isVerified });
+                              }
+                            }}
+                            className="font-extrabold text-xs text-gray-900 truncate hover:underline cursor-pointer"
+                          >
+                            {u.name}
+                          </span>
+                          {u.isVerified && <BadgeCheck className="w-3.5 h-3.5 text-white fill-[#0095f6]" />}
+                        </div>
+                        <span className="text-[10px] text-gray-400 font-semibold mt-0.5 line-clamp-1 w-full">Suggested Creator</span>
+                        
+                        <button
+                          onClick={() => onToggleFollow?.(u.id)}
+                          className="w-full mt-3 py-1.5 bg-brand-blue hover:bg-blue-600 active:scale-95 text-white font-extrabold text-[11px] rounded-lg shadow-sm transition-all"
+                        >
+                          Follow
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            }
+
             if (item.type === 'ad') {
               const ad = item.data;
               console.log('ad impression', ad.id);
@@ -2064,7 +2156,21 @@ export default function HomeFeed({
                     </motion.div>
                   </button>
 
-                  {/* Comment button removed in accordance with corporate safety update */}
+                  {/* Comment Button restored - Instagram Style */}
+                  <button 
+                    onClick={() => setActiveCommentPostId(post.id)}
+                    className="relative flex items-center justify-center p-1 active:scale-90 hover:scale-105 transition-all duration-200 group"
+                    title="Comentarios / Comments"
+                  >
+                    <MessageCircle 
+                      className="w-7 h-7 stroke-[1.75] text-gray-900 group-hover:text-red-500 transition-colors" 
+                    />
+                    {post.comments && post.comments.length > 0 && (
+                      <span className="absolute -top-1.5 -right-1.5 bg-red-500 text-white font-extrabold text-[9px] rounded-full px-1.5 py-0.5 min-w-[18px] text-center border-2 border-white shadow-sm">
+                        {post.comments.length}
+                      </span>
+                    )}
+                  </button>
 
                   {/* Share Button / Send Paperplane */}
                   <button 
@@ -2241,7 +2347,36 @@ export default function HomeFeed({
                   </div>
                 )}
                 
-                  {/* Comments disabled in compliance with corporate safety update */}
+                {/* Comments Section Restored - Instagram Style */}
+                <div className="flex flex-col gap-1.5 mt-2.5">
+                  {post.comments && post.comments.length > 0 ? (
+                    <button
+                      onClick={() => setActiveCommentPostId(post.id)}
+                      className="text-[13px] font-semibold text-gray-500 hover:text-gray-700 text-left transition-colors"
+                    >
+                      View all {post.comments.length} {post.comments.length === 1 ? 'comment' : 'comments'}
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => setActiveCommentPostId(post.id)}
+                      className="text-[13px] font-semibold text-gray-400 hover:text-gray-600 text-left transition-colors"
+                    >
+                      Add a comment...
+                    </button>
+                  )}
+
+                  {/* Top 2 Comments Preview Inline */}
+                  {post.comments && post.comments.length > 0 && (
+                    <div className="space-y-1 text-left">
+                      {post.comments.slice(0, 2).map((comment, cIdx) => (
+                        <div key={comment.id || cIdx} className="text-[13px] text-gray-800 leading-snug">
+                          <span className="font-extrabold text-gray-900 mr-2">{comment.authorName}</span>
+                          <span>{comment.text}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
                 
                 <span className="text-[10px] font-medium text-gray-400 mt-1.5 uppercase tracking-wide">{formatTime(post.timestamp)}</span>
               </div>

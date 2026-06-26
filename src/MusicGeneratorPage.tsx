@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { 
   ArrowLeft, Wand2, Sparkles, Download, Play, Pause, Music, Share2,
   X, Zap, Volume2, RefreshCw, AlertCircle, Disc, Square, Star, FileAudio,
-  Heart, Trash2, Globe
+  Heart, Trash2, Globe, Camera, Upload, Bell, Check, Users, Search, Mic
 } from 'lucide-react';
 import { auth, db } from './firebase';
 import { 
@@ -16,13 +16,16 @@ import {
   doc, 
   deleteDoc, 
   arrayUnion, 
-  arrayRemove 
+  arrayRemove,
+  limit
 } from 'firebase/firestore';
 
 interface MusicGeneratorProps {
   onBack: () => void;
   userSettings?: any;
   profileImg?: string;
+  importedVoiceAudio?: { url: string; blob: Blob; duration: number } | null;
+  clearImportedVoiceAudio?: () => void;
 }
 
 const MUSIC_GENRES = [
@@ -33,13 +36,40 @@ const MUSIC_GENRES = [
   { id: 'edm', name: 'Cyber EDM', description: 'Futuristic high-energy synth pulses', tempo: 125, color: 'text-rose-500 bg-rose-50 hover:bg-rose-100 border-rose-200' }
 ];
 
-export default function MusicGeneratorPage({ onBack, userSettings, profileImg }: MusicGeneratorProps) {
+export default function MusicGeneratorPage({ onBack, userSettings, profileImg, importedVoiceAudio, clearImportedVoiceAudio }: MusicGeneratorProps) {
   const [prompt, setPrompt] = useState('');
   const [selectedGenre, setSelectedGenre] = useState(MUSIC_GENRES[0]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [error, setError] = useState<string | null>(null);
   
+  // Custom voice track state
+  const [voiceAudioUrl, setVoiceAudioUrl] = useState<string | null>(null);
+  const [voiceAudioName, setVoiceAudioName] = useState<string | null>(null);
+  const [voiceAudioBlob, setVoiceAudioBlob] = useState<Blob | null>(null);
+  const [voiceVolume, setVoiceVolume] = useState<number>(0.85);
+
+  // Social friend tagging states
+  const [friendsList, setFriendsList] = useState<any[]>([]);
+  const [selectedFriends, setSelectedFriends] = useState<string[]>([]);
+  const [friendSearchQuery, setFriendSearchQuery] = useState('');
+
+  // Remix download states
+  const [isRecordingRemix, setIsRecordingRemix] = useState(false);
+  const [remixRecordProgress, setRemixRecordProgress] = useState(0);
+
+  // Notification sound bell state
+  const [notificationBellSavedId, setNotificationBellSavedId] = useState<string | null>(() => {
+    try {
+      const saved = localStorage.getItem('custom_notification_bell');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        return parsed.id || 'custom_active';
+      }
+    } catch (e) {}
+    return null;
+  });
+
   // Custom generated song state
   const [songTitle, setSongTitle] = useState<string | null>(null);
   const [songArtist, setSongArtist] = useState<string | null>(null);
@@ -53,6 +83,36 @@ export default function MusicGeneratorPage({ onBack, userSettings, profileImg }:
   const [shareSuccess, setShareSuccess] = useState<string | null>(null);
   const [playingTrackId, setPlayingTrackId] = useState<string | null>(null);
   const [copiedTrackId, setCopiedTrackId] = useState<string | null>(null);
+
+  // Load friends list for tagging on community share
+  useEffect(() => {
+    const q = query(collection(db, "users"), limit(100));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const list: any[] = [];
+      snapshot.forEach((docSnap) => {
+        const data = docSnap.data();
+        if (docSnap.id !== auth.currentUser?.uid) {
+          list.push({ id: docSnap.id, ...data });
+        }
+      });
+      setFriendsList(list);
+    }, (err) => {
+      console.error("Error loading network friends:", err);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Handle voice recordings imported from voice recorder page
+  useEffect(() => {
+    if (importedVoiceAudio) {
+      setVoiceAudioUrl(importedVoiceAudio.url);
+      setVoiceAudioBlob(importedVoiceAudio.blob);
+      setVoiceAudioName(`Imported recording (${Math.round(importedVoiceAudio.duration)}s)`);
+      // Notify the user with a gentle notice
+      setShareSuccess(`Imported voice recording loaded successfully! Select a sonic style and hit Generate to remix.`);
+      setTimeout(() => setShareSuccess(null), 4000);
+    }
+  }, [importedVoiceAudio]);
 
   // Loading community loops in real-time
   useEffect(() => {
@@ -74,6 +134,24 @@ export default function MusicGeneratorPage({ onBack, userSettings, profileImg }:
   const synthNodesRef = useRef<any[]>([]);
   const sequencerIntervalRef = useRef<any>(null);
   const isPlayingRef = useRef(false);
+  const voiceAudioElementRef = useRef<HTMLAudioElement | null>(null);
+  const mediaStreamDestinationRef = useRef<MediaStreamAudioDestinationNode | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const handleVoiceFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      const url = URL.createObjectURL(file);
+      setVoiceAudioUrl(url);
+      setVoiceAudioBlob(file);
+      setVoiceAudioName(file.name);
+      setError(null);
+    } catch (err: any) {
+      setError("Failed to process selected voice file: " + err.message);
+    }
+  };
 
   // Equalizer visual state
   const [waveHeights, setWaveHeights] = useState<number[]>([15, 15, 15, 15, 15, 15, 15, 15, 15, 15]);
@@ -147,6 +225,11 @@ export default function MusicGeneratorPage({ onBack, userSettings, profileImg }:
       compressor.release.setValueAtTime(0.25, ctx.currentTime);
       compressor.connect(ctx.destination);
 
+      // Create Media Recorder stream capture destination for Download Remix
+      const destStream = ctx.createMediaStreamDestination();
+      compressor.connect(destStream);
+      mediaStreamDestinationRef.current = destStream;
+
       const delay = ctx.createDelay();
       delay.delayTime.setValueAtTime(0.3, ctx.currentTime);
       const delayFeedback = ctx.createGain();
@@ -155,6 +238,33 @@ export default function MusicGeneratorPage({ onBack, userSettings, profileImg }:
       delay.connect(delayFeedback);
       delayFeedback.connect(delay);
       delay.connect(compressor);
+
+      // Play and route the voice recording overlay if loaded
+      if (voiceAudioUrl) {
+        try {
+          const voiceAudio = new Audio(voiceAudioUrl);
+          voiceAudioElementRef.current = voiceAudio;
+          voiceAudio.volume = voiceVolume;
+          voiceAudio.loop = true;
+          
+          const voiceSource = ctx.createMediaElementSource(voiceAudio);
+          voiceSource.connect(compressor);
+          if (selectedGenre.id === 'ambient' || selectedGenre.id === 'lofi') {
+            voiceSource.connect(delay);
+          }
+          
+          voiceAudio.play().catch(e => console.warn("Autoplay voice track overlay failed:", e));
+        } catch (voiceErr) {
+          console.warn("Routing voice audio element to web-audio graph failed, playing normally:", voiceErr);
+          try {
+            const voiceAudio = new Audio(voiceAudioUrl);
+            voiceAudioElementRef.current = voiceAudio;
+            voiceAudio.volume = voiceVolume;
+            voiceAudio.loop = true;
+            voiceAudio.play().catch(() => {});
+          } catch (e) {}
+        }
+      }
 
       // Basic note dictionary for selected scale
       // Chord progressions based on genre (i.e. Cool Ambient, Neo-Techno minor riff, etc.)
@@ -306,6 +416,13 @@ export default function MusicGeneratorPage({ onBack, userSettings, profileImg }:
       });
       synthNodesRef.current = [];
 
+      if (voiceAudioElementRef.current) {
+        try {
+          voiceAudioElementRef.current.pause();
+        } catch (e) {}
+        voiceAudioElementRef.current = null;
+      }
+
       if (audioCtxRef.current) {
         audioCtxRef.current.close().catch(() => {});
         audioCtxRef.current = null;
@@ -416,6 +533,15 @@ export default function MusicGeneratorPage({ onBack, userSettings, profileImg }:
     setPlayingTrackId(track.id);
     setPlaybackTime(0);
 
+    // Load custom shared voice if available
+    if (track.voiceUrl) {
+      setVoiceAudioUrl(track.voiceUrl);
+      setVoiceAudioName("Shared Voice Track overlay");
+    } else {
+      setVoiceAudioUrl(null);
+      setVoiceAudioName(null);
+    }
+
     // Boot play after state has updated
     setTimeout(() => {
       startSynthesizer();
@@ -448,12 +574,16 @@ export default function MusicGeneratorPage({ onBack, userSettings, profileImg }:
         creatorAvatar,
         likesCount: 0,
         likedBy: [],
-        createdAt: Date.now()
+        createdAt: Date.now(),
+        voiceUrl: voiceAudioUrl || null,
+        taggedFriends: selectedFriends || []
       };
 
       const path = 'shared_music';
       await addDoc(collection(db, path), trackData);
       setShareSuccess(`Successfully shared "${songTitle}" to the community playlist!`);
+      // Reset tagged friends list on successful share
+      setSelectedFriends([]);
       // Automatically switch tab to see their shared track!
       setTimeout(() => {
         setActiveTab('community');
@@ -464,6 +594,95 @@ export default function MusicGeneratorPage({ onBack, userSettings, profileImg }:
       setError("Failed to share track to the community list due to permission limits.");
     } finally {
       setIsSharing(false);
+    }
+  };
+
+  const downloadRemixSong = async (title: string) => {
+    if (isRecordingRemix) return;
+
+    const wasPlaying = isPlaying;
+    if (!isPlaying) {
+      startSynthesizer();
+    }
+
+    setIsRecordingRemix(true);
+    setRemixRecordProgress(0);
+
+    try {
+      // Small timeout to allow the AudioContext to start and connect nodes
+      await new Promise(resolve => setTimeout(resolve, 300));
+
+      const destStream = mediaStreamDestinationRef.current;
+      if (!destStream) {
+        throw new Error("Web Audio stream destination node not active. Play the track to capture standard remix layers.");
+      }
+
+      const mediaRecorder = new MediaRecorder(destStream.stream);
+      const chunks: Blob[] = [];
+
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) chunks.push(e.data);
+      };
+
+      mediaRecorder.onstop = () => {
+        const blob = new Blob(chunks, { type: 'audio/wav' });
+        const url = URL.createObjectURL(blob);
+
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${title.replace(/\s+/g, '_')}_Remix.wav`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+
+        setIsRecordingRemix(false);
+        setRemixRecordProgress(0);
+
+        if (!wasPlaying) {
+          stopSynthesizer();
+        }
+      };
+
+      mediaRecorder.start();
+
+      // Record a highly cinematic 8-second remix snippet
+      const recordSeconds = 8;
+      let elapsed = 0;
+      const progressInterval = setInterval(() => {
+        elapsed += 1;
+        setRemixRecordProgress(Math.min(Math.round((elapsed / recordSeconds) * 100), 100));
+        if (elapsed >= recordSeconds) {
+          clearInterval(progressInterval);
+          try {
+            mediaRecorder.stop();
+          } catch (e) {}
+        }
+      }, 1000);
+
+    } catch (err: any) {
+      console.error("Error capturing remix stream:", err);
+      setError("Failed to record remix: " + err.message);
+      setIsRecordingRemix(false);
+    }
+  };
+
+  const setAsNotificationBell = (track: any) => {
+    try {
+      const bellConfig = {
+        id: track.id || 'custom_active',
+        title: track.title,
+        genre: track.genre || selectedGenre.id,
+        voiceUrl: track.voiceUrl || voiceAudioUrl || null
+      };
+      
+      localStorage.setItem('custom_notification_bell', JSON.stringify(bellConfig));
+      setNotificationBellSavedId(bellConfig.id);
+      
+      setShareSuccess(`"${track.title}" set successfully as your incoming message ringtone! 🔔`);
+      setTimeout(() => setShareSuccess(null), 4000);
+    } catch (e) {
+      console.error("Could not set custom ringtone bell:", e);
+      setError("Failed to set notification ringtone.");
     }
   };
 
@@ -663,6 +882,92 @@ export default function MusicGeneratorPage({ onBack, userSettings, profileImg }:
                 </div>
               </div>
 
+              {/* Voice Overlay Section */}
+              <div className="flex flex-col gap-2 border-t border-gray-100 pt-4 mt-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-[11px] font-bold text-gray-400 uppercase tracking-wider px-1 flex items-center gap-1.5">
+                    <Mic className="w-3.5 h-3.5 text-indigo-500 animate-pulse" /> Mix Voice Track (Remix)
+                  </label>
+                  
+                  <input 
+                    type="file"
+                    ref={fileInputRef}
+                    onChange={handleVoiceFileUpload}
+                    accept="audio/*,video/*"
+                    className="hidden"
+                  />
+                  
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="flex items-center gap-1 px-2.5 py-1 text-[10px] font-bold text-indigo-600 hover:text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-xl transition-all"
+                  >
+                    <Camera className="w-3 h-3" />
+                    <span>Upload Recording</span>
+                  </button>
+                </div>
+
+                {voiceAudioUrl ? (
+                  <div className="p-3 bg-gradient-to-r from-slate-900 to-indigo-950 rounded-2xl border border-indigo-500/20 text-white flex flex-col gap-3 shadow-sm">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <div className="w-7 h-7 rounded-lg bg-indigo-500/20 flex items-center justify-center text-indigo-400 shrink-0">
+                          <FileAudio className="w-4 h-4" />
+                        </div>
+                        <p className="text-xs font-bold truncate pr-1 text-slate-100">{voiceAudioName || "Voice Track Active"}</p>
+                      </div>
+                      <button 
+                        type="button"
+                        onClick={() => {
+                          setVoiceAudioUrl(null);
+                          setVoiceAudioBlob(null);
+                          setVoiceAudioName(null);
+                          if (clearImportedVoiceAudio) {
+                            clearImportedVoiceAudio();
+                          }
+                        }}
+                        className="text-slate-400 hover:text-white p-1 rounded-full hover:bg-white/10"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+
+                    {/* Volume balance slider */}
+                    <div className="flex items-center gap-2 px-1">
+                      <Volume2 className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                      <input 
+                        type="range"
+                        min="0"
+                        max="1"
+                        step="0.05"
+                        value={voiceVolume}
+                        onChange={(e) => {
+                          const v = parseFloat(e.target.value);
+                          setVoiceVolume(v);
+                          if (voiceAudioElementRef.current) {
+                            voiceAudioElementRef.current.volume = v;
+                          }
+                        }}
+                        className="flex-1 accent-indigo-500 h-1 bg-slate-800 rounded-lg cursor-pointer"
+                      />
+                      <span className="text-[10px] font-bold font-mono text-indigo-300 w-8 text-right">
+                        {Math.round(voiceVolume * 100)}%
+                      </span>
+                    </div>
+                  </div>
+                ) : (
+                  <div 
+                    onClick={() => fileInputRef.current?.click()}
+                    className="border border-dashed border-gray-200 hover:border-indigo-500/40 p-3.5 rounded-2xl flex flex-col items-center justify-center gap-2 text-center cursor-pointer bg-gray-50/50 hover:bg-indigo-50/10 transition-all group"
+                  >
+                    <div className="w-8 h-8 rounded-full bg-white group-hover:bg-indigo-50 shadow-sm border border-gray-100 flex items-center justify-center text-gray-400 group-hover:text-indigo-500 transition-colors">
+                      <Camera className="w-4 h-4" />
+                    </div>
+                    <p className="text-[11px] text-gray-500 font-bold tracking-tight">Add Voice recording, MP3 or camera file to mix with instrumentals</p>
+                  </div>
+                )}
+              </div>
+
               <button
                 onClick={handleGenerate}
                 disabled={isGenerating || !prompt.trim()}
@@ -760,7 +1065,7 @@ export default function MusicGeneratorPage({ onBack, userSettings, profileImg }:
                       <button 
                         onClick={shareTrackToCommunity}
                         disabled={isSharing}
-                        className="flex-1 py-3.5 px-4 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold text-xs rounded-2xl flex items-center justify-center gap-2 transition-all active:scale-[0.98] disabled:opacity-50 border border-indigo-100"
+                        className="flex-1 py-3.5 px-4 bg-gradient-to-r from-indigo-600 to-purple-600 hover:brightness-105 text-white font-bold text-xs rounded-2xl flex items-center justify-center gap-2 transition-all active:scale-[0.98] disabled:opacity-50"
                       >
                         {isSharing ? (
                           <RefreshCw className="w-4 h-4 animate-spin" />
@@ -777,6 +1082,123 @@ export default function MusicGeneratorPage({ onBack, userSettings, profileImg }:
                       >
                         <Share2 className="w-5 h-5" />
                       </button>
+                    </div>
+
+                    {/* Integrated Download & Notification ringtone panel */}
+                    <div className="grid grid-cols-2 gap-2 mt-1">
+                      {/* Set Notification Ringtone */}
+                      <button
+                        onClick={() => setAsNotificationBell({ id: 'generated_current', title: songTitle, genre: selectedGenre.id, voiceUrl: voiceAudioUrl })}
+                        className={`py-3 px-4 rounded-2xl font-bold text-xs flex items-center justify-center gap-1.5 transition-all border ${
+                          notificationBellSavedId === 'generated_current'
+                            ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
+                            : 'bg-white border-gray-200 hover:bg-gray-50 text-gray-700'
+                        }`}
+                      >
+                        {notificationBellSavedId === 'generated_current' ? (
+                          <>
+                            <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+                            <span>Active Ringtone</span>
+                          </>
+                        ) : (
+                          <>
+                            <Bell className="w-4 h-4 text-gray-400 shrink-0" />
+                            <span>Set as Ringtone</span>
+                          </>
+                        )}
+                      </button>
+
+                      {/* Direct remix download for song maker */}
+                      <button
+                        onClick={() => downloadRemixSong(songTitle)}
+                        disabled={isRecordingRemix}
+                        className="py-3 px-4 bg-slate-900 hover:bg-slate-800 disabled:bg-slate-700 text-white rounded-2xl font-bold text-xs flex items-center justify-center gap-1.5 transition-all shadow-sm"
+                      >
+                        {isRecordingRemix ? (
+                          <>
+                            <RefreshCw className="w-4 h-4 animate-spin shrink-0 text-indigo-400" />
+                            <span>Recording {remixRecordProgress}%</span>
+                          </>
+                        ) : (
+                          <>
+                            <Download className="w-4 h-4 text-indigo-400 shrink-0" />
+                            <span>Download Remix</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+
+                    {/* Remix Recording Progress Feedback */}
+                    {isRecordingRemix && (
+                      <div className="bg-indigo-50 border border-indigo-100 p-3 rounded-2xl flex flex-col gap-2 shadow-sm">
+                        <div className="flex justify-between items-center text-[11px] font-bold text-indigo-800">
+                          <span className="flex items-center gap-1"><Mic className="w-3 h-3 text-indigo-500 animate-pulse" /> Live remix stream recording...</span>
+                          <span>{remixRecordProgress}%</span>
+                        </div>
+                        <div className="w-full h-1.5 bg-indigo-100 rounded-full overflow-hidden">
+                          <div className="h-full bg-indigo-600 transition-all duration-300" style={{ width: `${remixRecordProgress}%` }} />
+                        </div>
+                        <p className="text-[9px] text-indigo-500 font-bold leading-normal">Our high-fidelity audio engine is running a 8-second capture to compile synthesizer and voice elements together.</p>
+                      </div>
+                    )}
+
+                    {/* Pre-share tagging section */}
+                    <div className="border-t border-gray-100 pt-3 flex flex-col gap-2">
+                      <div className="flex items-center justify-between px-1">
+                        <span className="text-[10px] font-extrabold text-gray-400 uppercase tracking-wider flex items-center gap-1">
+                          <Users className="w-3.5 h-3.5 text-indigo-500" /> Tag friends when sharing
+                        </span>
+                        {selectedFriends.length > 0 && (
+                          <span className="text-[10px] font-extrabold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full">
+                            {selectedFriends.length} Tagged
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="relative">
+                        <Search className="w-3.5 h-3.5 text-gray-400 absolute left-3 top-2.5" />
+                        <input 
+                          type="text"
+                          placeholder="Search friends to tag..."
+                          value={friendSearchQuery}
+                          onChange={(e) => setFriendSearchQuery(e.target.value)}
+                          className="w-full pl-8 pr-3 py-1.5 text-xs bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+                        />
+                      </div>
+
+                      <div className="flex gap-1.5 overflow-x-auto py-1 max-h-24 hide-scrollbar">
+                        {friendsList
+                          .filter(f => !friendSearchQuery || f.name?.toLowerCase().includes(friendSearchQuery.toLowerCase()) || f.email?.toLowerCase().includes(friendSearchQuery.toLowerCase()))
+                          .map((friend) => {
+                            const isSelected = selectedFriends.includes(friend.id);
+                            return (
+                              <button
+                                type="button"
+                                key={friend.id}
+                                onClick={() => {
+                                  if (isSelected) {
+                                    setSelectedFriends(prev => prev.filter(id => id !== friend.id));
+                                  } else {
+                                    setSelectedFriends(prev => [...prev, friend.id]);
+                                  }
+                                }}
+                                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-[11px] font-bold shrink-0 transition-all ${
+                                  isSelected 
+                                    ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+                                    : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+                                }`}
+                              >
+                                <img 
+                                  src={friend.photoURL || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=50&h=50'} 
+                                  alt={friend.name}
+                                  className="w-4 h-4 rounded-full object-cover shrink-0"
+                                />
+                                <span>{friend.name || "User"}</span>
+                                {isSelected && <Check className="w-3 h-3 text-white" />}
+                              </button>
+                            );
+                          })}
+                      </div>
                     </div>
                   </div>
 
@@ -885,11 +1307,28 @@ export default function MusicGeneratorPage({ onBack, userSettings, profileImg }:
                             />
                             <span className="text-[10px] text-gray-500 font-bold">@{track.creatorName || 'user'}</span>
                           </div>
+
+                          {/* Tagged Friends Display */}
+                          {track.taggedFriends && track.taggedFriends.length > 0 && (
+                            <div className="flex flex-wrap gap-1 mt-2 items-center">
+                              <span className="text-[9px] font-extrabold text-indigo-500 uppercase tracking-wider shrink-0 mr-1">Tagged:</span>
+                              {track.taggedFriends.map((friendId: string) => {
+                                const friendObj = friendsList.find(f => f.id === friendId);
+                                const displayName = friendObj ? friendObj.name : "Friend";
+                                return (
+                                  <span key={friendId} className="px-2 py-0.5 bg-indigo-50 border border-indigo-100/30 rounded-full text-[9px] font-bold text-indigo-600 flex items-center gap-1 shrink-0">
+                                    <span className="w-1 h-1 rounded-full bg-indigo-500 shrink-0" />
+                                    {displayName}
+                                  </span>
+                                );
+                              })}
+                            </div>
+                          )}
                         </div>
                       </div>
-
+ 
                       {/* Panel Controls (Like, Share, Delete) */}
-                      <div className="flex flex-col items-end gap-2.5 shrink-0 pl-1">
+                      <div className="flex flex-col items-end gap-2 shrink-0 pl-1">
                         {/* Liking */}
                         <button
                           onClick={() => handleLikeTrack(track)}
@@ -902,8 +1341,33 @@ export default function MusicGeneratorPage({ onBack, userSettings, profileImg }:
                           <Heart className={`w-3.5 h-3.5 ${hasLiked ? 'fill-rose-600 text-rose-600' : ''}`} />
                           <span className="text-[10.5px] font-sans">{track.likesCount || 0}</span>
                         </button>
-
+ 
                         <div className="flex gap-1">
+                          {/* Set as Ringtone Bell */}
+                          <button
+                            onClick={() => setAsNotificationBell(track)}
+                            className={`p-1.5 rounded-lg border active:scale-95 transition-all flex items-center justify-center ${
+                              notificationBellSavedId === track.id
+                                ? 'bg-emerald-50 border-emerald-200 text-emerald-600'
+                                : 'bg-gray-50 border-gray-100 text-gray-400 hover:text-gray-600'
+                            }`}
+                            title="Set as Notification Ringtone"
+                          >
+                            <Bell className={`w-3.5 h-3.5 ${notificationBellSavedId === track.id ? 'fill-emerald-600 text-emerald-600 animate-bounce' : ''}`} />
+                          </button>
+
+                          {/* Song Maker Only remix downloader */}
+                          {isOwner && (
+                            <button
+                              onClick={() => downloadRemixSong(track.title)}
+                              disabled={isRecordingRemix}
+                              className="p-1.5 bg-slate-950 text-white rounded-lg active:scale-95 hover:bg-slate-800 disabled:opacity-50 transition-all flex items-center justify-center shrink-0"
+                              title="Download your remix direct to your phone"
+                            >
+                              <Download className="w-3.5 h-3.5 text-indigo-400" />
+                            </button>
+                          )}
+
                           {/* Share button fallback */}
                           <button
                             onClick={() => handleShareTrackLink(track)}
@@ -917,7 +1381,7 @@ export default function MusicGeneratorPage({ onBack, userSettings, profileImg }:
                               </span>
                             )}
                           </button>
-
+ 
                           {/* Delete capability if owner or admin */}
                           {(isOwner || isAdminUser) && (
                             <button

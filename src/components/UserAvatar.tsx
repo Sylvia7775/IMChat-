@@ -24,14 +24,31 @@ export default function UserAvatar({ src, name, className = '', onClick, size = 
 
   const isVideo = src && (src.toLowerCase().endsWith('.mp4') || src.includes('.mp4?') || src.toLowerCase().includes('video/mp4') || src.startsWith('data:video/mp4'));
 
-  if (!src || imageFailed) {
+  // Check if it represents a robot avatar, dicebear avatar, robohash avatar, or an unknown user
+  const isRobotOrPlaceholder = src && (
+    src.includes('dicebear.com') || 
+    src.includes('robohash.org') || 
+    src.toLowerCase().includes('robot') || 
+    src.toLowerCase().includes('bot')
+  );
+
+  const isUnknown = !name || 
+    name.toLowerCase().includes('unknown') || 
+    name.toLowerCase() === 'user' || 
+    name.toLowerCase() === 'anonymous';
+
+  if (!src || imageFailed || isRobotOrPlaceholder || isUnknown) {
     return (
       <div 
-        id="avatar_silhouette_fallback" 
-        className={`${baseClasses} bg-gray-200 text-gray-500 flex items-center justify-center select-none shadow-sm border border-white/20`} 
+        id="avatar_blank" 
+        className={`${baseClasses} bg-gray-100/30 border border-gray-200/30 flex items-center justify-center select-none`} 
         onClick={onClick}
       >
-        <User className="w-1/2 h-1/2 stroke-[1.75]" />
+        <img 
+          src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" 
+          className="w-full h-full object-cover opacity-0" 
+          alt="" 
+        />
       </div>
     );
   }

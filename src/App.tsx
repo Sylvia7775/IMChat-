@@ -86,6 +86,8 @@ const HomeFeed = lazy(() => import('./HomeFeed')) as React.ComponentType<{
   userSettings?: any;
   userRole?: string;
   onUpdateAvatar?: (url: string) => Promise<void> | void;
+  followingState?: Record<string, boolean>;
+  onToggleFollow?: (userId: string) => void;
 }>;
 const UserDirectory = lazy(() => import('./UserDirectory'));
 import CallHistory from './CallHistory';
@@ -152,6 +154,7 @@ export default function App() {
   const [showUploadReel, setShowUploadReel] = useState(false);
   const [showCreateMenu, setShowCreateMenu] = useState(false);
   const [showVoiceRecorder, setShowVoiceRecorder] = useState(false);
+  const [importedVoiceAudio, setImportedVoiceAudio] = useState<{ url: string; blob: Blob; duration: number } | null>(null);
   const [stitchSource, setStitchSource] = useState<any | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [profileImg, setProfileImg] = useState(() => localStorage.getItem('profileImg') || undefined);
@@ -1050,6 +1053,13 @@ export default function App() {
     
     setNotifications(prev => [newNotification, ...prev]);
     
+    // Play active notification chime or custom AI music ringtone!
+    try {
+      playNotificationSound();
+    } catch (e) {
+      console.warn("Could not play chime", e);
+    }
+    
     if (shouldShowToast) {
       setTimeout(() => {
         setNotifications(prev => prev.map(n => n.id === id ? { ...n, showToast: false } : n));
@@ -1572,6 +1582,8 @@ export default function App() {
                   currentUserId={user?.uid || ''}
                   currentUserName={userSettings?.name || 'User'}
                   profileImg={profileImg}
+                  followingState={followingState}
+                  onToggleFollow={toggleFollow}
                 />
               </div>
             )}
@@ -1613,6 +1625,8 @@ export default function App() {
                   onBack={() => setActiveNav('home')} 
                   userSettings={userSettings}
                   profileImg={profileImg}
+                  importedVoiceAudio={importedVoiceAudio}
+                  clearImportedVoiceAudio={() => setImportedVoiceAudio(null)}
                 />
               </div>
             )}
@@ -1708,6 +1722,8 @@ export default function App() {
                 userSettings={userSettings}
                 userRole={userRole}
                 onUpdateAvatar={handleUpdateAvatar}
+                followingState={followingState}
+                onToggleFollow={toggleFollow}
               />
             )}
             {activeNav === 'directory' && (
@@ -2010,7 +2026,14 @@ export default function App() {
             />
           )}
           {showVoiceRecorder && (
-            <VoiceRecorderCapture onClose={() => setShowVoiceRecorder(false)} />
+            <VoiceRecorderCapture 
+              onClose={() => setShowVoiceRecorder(false)} 
+              onImportToAiMusic={(data) => {
+                setImportedVoiceAudio(data);
+                setShowVoiceRecorder(false);
+                setActiveNav('ai_music');
+              }}
+            />
           )}
         </AnimatePresence>
       </Suspense>
