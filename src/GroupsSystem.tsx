@@ -115,9 +115,16 @@ export default function GroupsSystem({
       try {
         const snap = await getDocs(collection(db, "users"));
         const list: any[] = [];
+        const BLACKLIST_EMAILS = [
+          '18932572358@imchat.im',
+          'cameron89@aol.webstexact-1782132253-1m8faz68@imchat.im',
+          'stexact-1782124890-rxh34y95@imchat.im'
+        ];
         snap.forEach((doc: any) => {
-          if (doc.id !== currentUserId) {
-            list.push({ id: doc.id, ...doc.data() });
+          const data = doc.data() as any;
+          const userEmail = (data?.email || '').toLowerCase().trim();
+          if (doc.id !== currentUserId && !BLACKLIST_EMAILS.some(b => userEmail === b.toLowerCase())) {
+            list.push({ id: doc.id, ...data });
           }
         });
         setGeneralUsers(list);
@@ -1359,7 +1366,9 @@ export default function GroupsSystem({
                          return (
                            <div key={u.id} className="flex items-center justify-between gap-3">
                              <div className="flex items-center gap-2.5 min-w-0">
-                               <UserAvatar src={u.avatar} name={u.name} size="sm" className="border ring-1 ring-gray-100" />
+                               <div className="w-[44px] h-[44px] rounded-full bg-gradient-to-tr from-yellow-400 via-pink-500 to-purple-500 p-[1.5px] shrink-0 active:scale-95 transition-transform duration-100">
+                                 <UserAvatar src={u.avatar} name={u.name} size="sm" className="!w-full !h-full border-2 border-white" />
+                               </div>
                                <div className="flex flex-col min-w-0">
                                  <span className="font-extrabold text-xs text-gray-900 truncate flex items-center gap-1">
                                    {u.name}
@@ -1371,10 +1380,10 @@ export default function GroupsSystem({
 
                              <button
                                onClick={() => onToggleFollow?.(u.id)}
-                               className={`px-3 py-1.5 rounded-lg text-[11px] font-black transition-all active:scale-95 ${
+                               className={`px-3 py-1 bg-[#0095f6] hover:bg-[#1877f2] active:scale-95 text-white font-bold text-[11px] rounded-md shadow-sm transition-all ${
                                  isFollowing 
-                                   ? 'bg-gray-100 text-gray-500 hover:bg-gray-200' 
-                                   : 'bg-brand-blue text-white hover:bg-blue-600 shadow-sm'
+                                   ? 'bg-gray-100 !text-gray-500 hover:bg-gray-200 shadow-none border border-transparent' 
+                                   : 'bg-[#0095f6] hover:bg-[#1877f2]'
                                }`}
                              >
                                {isFollowing ? 'Following' : 'Follow'}

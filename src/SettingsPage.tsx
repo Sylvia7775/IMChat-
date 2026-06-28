@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { 
   ArrowLeft, User, Mail, AlignLeft, Bell, Check, Trash2, HardDrive, RefreshCcw, 
   Camera, ShieldCheck, Loader2, Key, ChevronRight, Hash, Phone, Wallet, 
-  Sparkles, ShieldAlert, Laptop, EyeOff, LayoutGrid, Award, ShoppingBag, PlusCircle, ArrowRightLeft, Radio 
+  Sparkles, ShieldAlert, Laptop, EyeOff, LayoutGrid, Award, ShoppingBag, PlusCircle, ArrowRightLeft, Radio, MapPin 
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { VideoCache } from './lib/VideoCache';
@@ -52,6 +52,7 @@ export interface SecondaryAccount {
   isBusinessAccount: boolean;
   businessName?: string;
   businessCategory?: string;
+  city?: string;
 }
 
 export const BusinessStore = {
@@ -87,6 +88,7 @@ export default function SettingsPage({ onClose, onSave, initialData, isNewUser, 
   const [age, setAge] = useState<number>(initialData?.age || 22);
   const [gender, setGender] = useState<string>(initialData?.gender || 'Male');
   const [phone, setPhone] = useState<string>(initialData?.phone || '');
+  const [city, setCity] = useState<string>(initialData?.city || '');
   const [role, setRole] = useState<string>(initialData?.role || userRole || 'user');
   
   // Email & features settings
@@ -246,6 +248,7 @@ export default function SettingsPage({ onClose, onSave, initialData, isNewUser, 
           isBusinessAccount,
           businessName,
           businessCategory,
+          city: city.trim(),
           isSetupComplete: true 
         };
         await onSave(payload);
@@ -300,7 +303,8 @@ export default function SettingsPage({ onClose, onSave, initialData, isNewUser, 
       walletBalance,
       isBusinessAccount,
       businessName,
-      businessCategory
+      businessCategory,
+      city
     };
 
     // Swap states
@@ -312,6 +316,7 @@ export default function SettingsPage({ onClose, onSave, initialData, isNewUser, 
     setAge(secondAccount.age);
     setGender(secondAccount.gender);
     setPhone(secondAccount.phone);
+    setCity(secondAccount.city || '');
     setEmail(secondAccount.email);
     setWalletBalance(secondAccount.walletBalance);
     setIsBusinessAccount(secondAccount.isBusinessAccount);
@@ -620,6 +625,21 @@ export default function SettingsPage({ onClose, onSave, initialData, isNewUser, 
                     onChange={(e) => setPhone(e.target.value)}
                     className="w-full bg-gray-50 text-gray-900 rounded-lg p-2.5 text-sm font-mono outline-none border border-transparent focus:border-blue-500 font-bold"
                     placeholder="Enter your mobile number"
+                  />
+                </div>
+
+                {/* User Location City */}
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-gray-400 uppercase flex items-center gap-1">
+                    <MapPin className="w-3.5 h-3.5 text-blue-500" />
+                    User Location (City, Country)
+                  </label>
+                  <input 
+                    type="text" 
+                    value={city}
+                    onChange={(e) => setCity(e.target.value)}
+                    className="w-full bg-gray-50 text-gray-900 rounded-lg p-2.5 text-sm font-mono outline-none border border-transparent focus:border-blue-500 font-bold"
+                    placeholder="e.g. New York, NY or Madrid, Spain"
                   />
                 </div>
 

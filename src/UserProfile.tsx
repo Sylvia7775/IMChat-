@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Camera, CloudSun, Grid3X3, PlaySquare, UserSquare2, Heart, Folder, Plus, X, Edit2, Trash2, Replace, Send, BadgeCheck, ShieldCheck, ShieldAlert, Instagram, RefreshCw, HardDrive, Search, FileVideo, FileImage, Image as ImageIcon, Loader2, Users, Star, Phone, Wallet, QrCode, Copy, Smile, Upload, Link as LinkIcon } from 'lucide-react';
+import { Camera, CloudSun, Grid3X3, PlaySquare, UserSquare2, Heart, Folder, Plus, X, Edit2, Trash2, Replace, Send, BadgeCheck, ShieldCheck, ShieldAlert, Instagram, RefreshCw, HardDrive, Search, FileVideo, FileImage, Image as ImageIcon, Loader2, Users, Star, Phone, Wallet, QrCode, Copy, Smile, Upload, Link as LinkIcon, MapPin } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { MediaStore, MediaItem, MAX_FILE_SIZE } from './lib/MediaStorage';
 import { auth, db, handleFirestoreError, OperationType } from './firebase';
@@ -27,6 +27,7 @@ export interface User {
   profileLocked?: boolean;
   adminFollowersCount?: number | null;
   adminFollowingCount?: number | null;
+  city?: string;
 }
 
 interface UserProfileProps {
@@ -763,6 +764,7 @@ export default function UserProfile({
   const displayName = activeUserName;
   const displayHandle = isCurrentUser ? `@${currentUserSettings?.username || ''}` : `@${user?.username || (user?.name || '').toLowerCase().replace(/\s+/g, '_')}`;
   const displayBio = isCurrentUser ? (currentUserSettings?.bio || '') : (user?.bio || '');
+  const displayCity = isCurrentUser ? (currentUserSettings?.city || '') : (user?.city || '');
 
   const displayStats = initialStats.map(s => {
     if (s.label === 'Posts') {
@@ -789,7 +791,7 @@ export default function UserProfile({
           {/* Avatar styled with gradient storytelling ring */}
           <div className="relative shrink-0 flex items-center justify-center p-[3px] rounded-full bg-gradient-to-tr from-yellow-500 via-pink-500 to-purple-600 shadow-sm">
             <div 
-              className={`w-[102px] h-[102px] rounded-full overflow-hidden border-[3px] border-white shrink-0 relative group bg-gray-50 ${isCurrentUser && !isUploading ? 'cursor-pointer active:scale-95 transition-all' : ''}`}
+              className={`w-[95px] h-[95px] rounded-full overflow-hidden border-[3px] border-white shrink-0 relative group bg-gray-50 ${isCurrentUser && !isUploading ? 'cursor-pointer active:scale-95 transition-all' : ''}`}
               onClick={() => isCurrentUser && !isUploading && fileInputRef?.current?.click()}
             >
                 <UserAvatar 
@@ -858,6 +860,12 @@ export default function UserProfile({
           </div>
           <span className="text-[15px] text-gray-400 font-medium">{displayHandle}</span>
           {displayBio && <p className="text-[15px] text-gray-800 mt-2 whitespace-pre-line leading-snug">{displayBio}</p>}
+          {displayCity && (
+            <div className="flex items-center gap-1.5 mt-2.5 text-[14px] text-slate-500 font-medium hover:text-[#0095f6] transition-colors cursor-pointer select-none">
+              <MapPin className="w-4 h-4 text-slate-400" />
+              <span>{displayCity}</span>
+            </div>
+          )}
 
           {/* Badges Removed */}
           <div className="hidden">

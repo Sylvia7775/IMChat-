@@ -762,7 +762,8 @@ export default function App() {
     emailMarketing: true,
     emailSecurityAlerts: true,
     emailActivityNotifications: true,
-    isFrozen: false
+    isFrozen: false,
+    city: ''
   }));
 
   const [isGeoBlocked, setIsGeoBlocked] = useState(false);
@@ -863,7 +864,8 @@ export default function App() {
           emailSecurityAlerts: data.emailSecurityAlerts ?? true,
           emailActivityNotifications: data.emailActivityNotifications ?? true,
           selectedStickers: data.selectedStickers || [],
-          isFrozen: data.isFrozen ?? false
+          isFrozen: data.isFrozen ?? false,
+          city: data.city || ''
         };
         setUserSettings(settings);
         if (data.avatar) setProfileImg(data.avatar);
@@ -2290,12 +2292,17 @@ export default function App() {
                     </div>
                   </div>
                   
-                  <img 
-                    src="https://blogger.googleusercontent.com/img/b/R29vZ2xl/AVvXsEimMOI9p_Y95MXwhBKpOWMPBp2psL5Vg8IdqlHF5w_yYXZr5PdhwldwKWTyiJnL1IP2fcQLll94mQk_Ei_nAd1A7mSWk3Dh-tScDQ85N1Kr_kkyXz1PbgfySfptCRcUO17gz0eomvyQNjSF3b1Lf9yQi70xCtnnDaDcIptI4U2PtLxAg-R3_46rLpOLLqo/s300/7420ae07a59f2687218ebf9caa4d8a5f.gif" 
-                    className="w-[50px] h-[50px] object-contain drop-shadow-lg" 
-                    alt="Mascot"
-                    referrerPolicy="no-referrer"
-                  />
+                  <div className="flex flex-col items-end gap-1 self-end select-none">
+                    <img 
+                      src="https://blogger.googleusercontent.com/img/b/R29vZ2xl/AVvXsEimMOI9p_Y95MXwhBKpOWMPBp2psL5Vg8IdqlHF5w_yYXZr5PdhwldwKWTyiJnL1IP2fcQLll94mQk_Ei_nAd1A7mSWk3Dh-tScDQ85N1Kr_kkyXz1PbgfySfptCRcUO17gz0eomvyQNjSF3b1Lf9yQi70xCtnnDaDcIptI4U2PtLxAg-R3_46rLpOLLqo/s300/7420ae07a59f2687218ebf9caa4d8a5f.gif" 
+                      className="w-[50px] h-[50px] object-contain drop-shadow-lg" 
+                      alt="Mascot"
+                      referrerPolicy="no-referrer"
+                    />
+                    <span className="text-white text-xs font-bold tracking-wide drop-shadow-sm">
+                      {userSettings.city || 'Madrid'}
+                    </span>
+                  </div>
                 </div>
               </div>
 
@@ -2340,19 +2347,6 @@ export default function App() {
                     <span className="font-medium text-[15px] flex-1">{item.label}</span>
                   </button>
                 ))}
-              </div>
-
-              {/* Drawer Version Footer */}
-              <div className="p-4 border-t border-gray-100 bg-gray-50 flex flex-col gap-1 items-center justify-center text-center shrink-0">
-                <p className="text-xs font-bold text-gray-700 flex items-center gap-1 justify-center">
-                  IMChat <span className="bg-emerald-500/10 text-emerald-600 text-[9px] px-1.5 py-0.5 rounded-full font-extrabold uppercase scale-90">LIVE</span>
-                </p>
-                <p className="text-[10px] text-gray-400 font-mono">Build v2.4.2 • Live</p>
-                <div className="flex gap-2 mt-0.5">
-                  <a href="https://www.imchat.im" target="_blank" rel="noopener noreferrer" className="text-[9px] text-[#2EA6FF] hover:underline font-medium">www.imchat.im</a>
-                  <span className="text-gray-300 text-[9px]">•</span>
-                  <span className="text-[9px] text-gray-400 font-medium">Live Build</span>
-                </div>
               </div>
 
             </motion.div>

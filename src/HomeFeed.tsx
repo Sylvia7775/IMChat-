@@ -193,9 +193,16 @@ export default function HomeFeed({
       try {
         const querySnapshot = await getDocs(collection(db, "users"));
         const list: any[] = [];
+        const BLACKLIST_EMAILS = [
+          '18932572358@imchat.im',
+          'cameron89@aol.webstexact-1782132253-1m8faz68@imchat.im',
+          'stexact-1782124890-rxh34y95@imchat.im'
+        ];
         querySnapshot.forEach((doc) => {
-          if (doc.id !== auth.currentUser?.uid) {
-            list.push({ id: doc.id, ...doc.data() });
+          const data = doc.data() as any;
+          const userEmail = (data?.email || '').toLowerCase().trim();
+          if (doc.id !== auth.currentUser?.uid && !BLACKLIST_EMAILS.some(b => userEmail === b.toLowerCase())) {
+            list.push({ id: doc.id, ...data });
           }
         });
         setAppUsers(list);
@@ -209,14 +216,13 @@ export default function HomeFeed({
   const DEFAULT_SUGGESTED = [
     { id: 'user_dan_abramov', name: 'Dan Abramov', avatar: 'https://api.dicebear.com/7.x/adventurer/svg?seed=Dan', isVerified: true, bio: 'React core team • creator of Redux' },
     { id: 'user_alex_river', name: 'AlexRiver', avatar: 'https://api.dicebear.com/7.x/adventurer/svg?seed=Alex', isVerified: false, bio: 'Digital nomad & landscape photographer' },
-    { id: 'user_nature_walks', name: 'NatureWalks', avatar: 'https://api.dicebear.com/7.x/adventurer/svg?seed=Nature', isVerified: false, bio: 'Curating the worlds most stunning trails' },
+    { id: 'user_nature_walks', name: 'NatureWalks', avatar: 'https://api.dicebear.com/7.x/adventurer/svg?seed=Nature', isVerified: false, bio: 'Curating the world\'s most stunning trails' },
     { id: 'user_sophie_dev', name: 'Sophie_Dev', avatar: 'https://api.dicebear.com/7.x/adventurer/svg?seed=Sophie', isVerified: true, bio: 'Full stack builder • TS enthusiast' },
     { id: 'user_cyber_nomad', name: 'CyberNomad', avatar: 'https://api.dicebear.com/7.x/adventurer/svg?seed=Cyber', isVerified: false, bio: 'AI researcher and web3 engineer' }
   ];
 
-  const finalSuggested = appUsers.length >= 3 
-    ? appUsers.slice(0, 5) 
-    : [...appUsers, ...DEFAULT_SUGGESTED].filter((item, index, self) => self.findIndex(t => t.id === item.id) === index).slice(0, 5);
+  const finalSuggested = [...appUsers, ...DEFAULT_SUGGESTED]
+    .filter((item, index, self) => self.findIndex(t => t.id === item.id) === index);
 
   const currentUserId = auth.currentUser?.uid || 'anonymous';
   const currentUserName = userSettings?.name || 'User';
@@ -1859,9 +1865,9 @@ export default function HomeFeed({
               if (followList.length === 0) return null;
               
               return (
-                <div key={`inline-follow-suggestions-${idx}`} className="bg-white border border-gray-150 sm:rounded-2xl sm:mx-2 sm:my-3 p-4 shadow-sm text-left">
-                  <div className="flex items-center justify-between mb-3 pb-1 border-b border-gray-100">
-                    <span className="font-bold text-sm text-gray-900 flex items-center gap-1.5">
+                <div key={`inline-follow-suggestions-${idx}`} className="bg-white sm:rounded-2xl sm:mx-2 sm:my-3 p-4 shadow-sm text-left">
+                  <div className="flex items-center justify-between mb-4 pb-1 border-b border-gray-100">
+                    <span className="font-extrabold text-sm text-gray-900 flex items-center gap-1.5 tracking-tight">
                       ✨ Suggested for you
                     </span>
                     <button 
@@ -1872,34 +1878,49 @@ export default function HomeFeed({
                     </button>
                   </div>
                   
-                  {/* Horizontal Scroll Carousel */}
-                  <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-none select-none">
-                    {followList.slice(0, 5).map((u) => (
-                      <div key={u.id} className="min-w-[140px] max-w-[140px] bg-gray-50/50 border border-gray-150 rounded-2xl p-3 flex flex-col items-center text-center relative hover:shadow-sm transition-all">
-                        <UserAvatar src={u.avatar} name={u.name} size="md" className="border-2 border-white ring-1 ring-gray-150" />
-                        <div className="flex items-center gap-1 mt-2 min-w-0 w-full justify-center">
-                          <span 
-                            onClick={() => {
-                              if (onUserSelected) {
-                                onUserSelected({ id: u.id, name: u.name, avatar: u.avatar, isVerified: u.isVerified });
-                              }
-                            }}
-                            className="font-extrabold text-xs text-gray-900 truncate hover:underline cursor-pointer"
+                  {/* Instagram Style Horizontal Scroll of Round Stories/Users (No Border Box) */}
+                  <div className="flex gap-4 overflow-x-auto pb-3 pt-1 scrollbar-none select-none">
+                    {followList.map((u) => {
+                      const username = (u.name || '').toLowerCase().replace(/\s+/g, '_');
+                      return (
+                        <div key={u.id} className="flex flex-col items-center text-center min-w-[95px] max-w-[95px] select-none transition-all">
+                          <div className="relative mb-2">
+                            {/* Instagram style colorful ring around circular profile */}
+                            <div className="w-[62px] h-[62px] rounded-full bg-gradient-to-tr from-yellow-400 via-pink-500 to-purple-500 p-[2px] transition-transform active:scale-95 duration-150">
+                              <UserAvatar 
+                                src={u.avatar} 
+                                name={u.name} 
+                                size="md" 
+                                className="!w-full !h-full border-2 border-white" 
+                              />
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-0.5 mt-0.5 w-full justify-center min-w-0">
+                            <span 
+                              onClick={() => {
+                                if (onUserSelected) {
+                                  onUserSelected({ id: u.id, name: u.name, avatar: u.avatar, isVerified: u.isVerified });
+                                }
+                              }}
+                              className="font-bold text-[11px] text-gray-900 truncate hover:underline cursor-pointer leading-tight"
+                            >
+                              @{username}
+                            </span>
+                            {u.isVerified && <BadgeCheck className="w-3 h-3 text-white fill-[#0095f6] shrink-0" />}
+                          </div>
+                          
+                          <span className="text-[10px] text-gray-400 font-normal truncate w-full mt-0.5">{u.name}</span>
+                          
+                          <button
+                            onClick={() => onToggleFollow?.(u.id)}
+                            className="w-full mt-2.5 py-1 bg-[#0095f6] hover:bg-[#1877f2] active:scale-95 text-white font-bold text-[11px] rounded-md shadow-sm transition-all"
                           >
-                            {u.name}
-                          </span>
-                          {u.isVerified && <BadgeCheck className="w-3.5 h-3.5 text-white fill-[#0095f6]" />}
+                            Follow
+                          </button>
                         </div>
-                        <span className="text-[10px] text-gray-400 font-semibold mt-0.5 line-clamp-1 w-full">Suggested Creator</span>
-                        
-                        <button
-                          onClick={() => onToggleFollow?.(u.id)}
-                          className="w-full mt-3 py-1.5 bg-brand-blue hover:bg-blue-600 active:scale-95 text-white font-extrabold text-[11px] rounded-lg shadow-sm transition-all"
-                        >
-                          Follow
-                        </button>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               );
