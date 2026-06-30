@@ -509,7 +509,7 @@ export default function UserDirectory({
                   <div 
                     key={user.id} 
                     onClick={() => onUserSelected(user)}
-                    className="flex items-center justify-between px-4 py-2 hover:bg-gray-50/50 cursor-pointer active:bg-gray-100 transition-colors group border-b border-gray-50"
+                    className="flex items-center justify-between px-4 py-3 hover:bg-gray-50/50 cursor-pointer active:bg-gray-100 transition-colors group border-b border-gray-50"
                   >
                     <div className="flex items-center gap-3 min-w-0 flex-1">
                       <div className="relative shrink-0">
@@ -525,32 +525,14 @@ export default function UserDirectory({
                       <div className="flex flex-col min-w-0 flex-1">
                         <div className="flex items-center gap-1.5 flex-wrap">
                           <div className="flex items-center gap-1 min-w-0">
-                            <span className="font-semibold text-sm text-gray-900 leading-tight truncate">@{username}</span>
+                            <span className="font-bold text-[16px] text-gray-900 leading-tight truncate">@{username}</span>
                             {(user.isVerified || (user.email && OWNER_EMAILS.includes(user.email.toLowerCase())) || (user.id === auth.currentUser?.uid && auth.currentUser?.email?.toLowerCase() && OWNER_EMAILS.includes(auth.currentUser.email.toLowerCase()))) && (
-                              <BadgeCheck className="w-3.5 h-3.5 text-white fill-brand-blue shrink-0" />
+                              <BadgeCheck className="w-4 h-4 text-white fill-brand-blue shrink-0" />
                             )}
                           </div>
                           <RoleBadge role={user.role} />
-                          <ActivityBadge level={getUserActivityLevel(user)} />
                         </div>
-                        <span className="text-[13px] text-gray-500 font-normal leading-tight mt-0.5 truncate">{user.name}</span>
-                        
-                        {/* Interactive metadata display (Email, Phone, Join Date) to fulfill the explicit request */}
-                        <div className="flex flex-col gap-0.5 mt-1 text-[10px] text-gray-400 font-semibold">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="flex items-center gap-0.5 text-gray-500 bg-gray-50 px-1 py-0.5 rounded border border-gray-100"><Calendar className="w-2.5 h-2.5" /> {formatAccountAge(user)}</span>
-                            {user.email && (
-                              <span className="flex items-center gap-0.5 text-gray-500 bg-gray-50 px-1 py-0.5 rounded border border-gray-100 truncate max-w-[150px]" title={user.email}>
-                                <Mail className="w-2.5 h-2.5" /> {user.email}
-                              </span>
-                            )}
-                            {user.phone && (
-                              <span className="flex items-center gap-0.5 text-gray-500 bg-gray-50 px-1 py-0.5 rounded border border-gray-100">
-                                <Phone className="w-2.5 h-2.5" /> {user.phone}
-                              </span>
-                            )}
-                          </div>
-                        </div>
+                        <span className="text-sm text-slate-400 font-medium leading-tight mt-0.5 truncate">{user.name}</span>
                       </div>
                     </div>
                     <button 
@@ -558,10 +540,10 @@ export default function UserDirectory({
                         e.stopPropagation();
                         onToggleFollow(user.id);
                       }}
-                      className={`px-5 py-[7px] text-[13px] font-semibold rounded-lg transition-all active:scale-95 shadow-sm shrink-0 ml-2 ${
+                      className={`px-5 py-2.5 text-[13px] font-bold rounded-xl transition-all active:scale-95 shadow-sm shrink-0 ml-2 min-w-[95px] text-center ${
                         isFollowing 
-                          ? 'bg-gradient-to-r from-[#7e22ce] to-[#9333ea] text-white shadow-purple-200/20' 
-                          : 'bg-brand-blue text-white border border-brand-blue hover:bg-blue-600'
+                          ? 'bg-[#8b5cf6] hover:bg-[#7c3aed] text-white shadow-purple-200/10' 
+                          : 'bg-brand-blue text-white hover:bg-blue-600'
                       }`}
                     >
                       {isFollowing ? 'Following' : 'Follow'}

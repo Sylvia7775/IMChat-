@@ -41,14 +41,10 @@ export default function UserAvatar({ src, name, className = '', onClick, size = 
     return (
       <div 
         id="avatar_blank" 
-        className={`${baseClasses} bg-gray-100/30 border border-gray-200/30 flex items-center justify-center select-none`} 
+        className={`${baseClasses} bg-slate-100 border border-slate-200/50 flex items-center justify-center select-none`} 
         onClick={onClick}
       >
-        <img 
-          src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" 
-          className="w-full h-full object-cover opacity-0" 
-          alt="" 
-        />
+        <User className="w-[45%] h-[45%] text-slate-400 stroke-[1.5]" />
       </div>
     );
   }
