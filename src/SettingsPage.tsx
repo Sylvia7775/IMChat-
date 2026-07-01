@@ -139,8 +139,9 @@ export default function SettingsPage({ onClose, onSave, initialData, isNewUser, 
   const [newAdLink, setNewAdLink] = useState('');
   const [adCampaignCost, setAdCampaignCost] = useState('300'); // in rupees ₹
 
-  // Secondary accounts switcher states (Up to 2 accounts)
+  // Secondary accounts switcher states (Unlimited accounts)
   const [secondAccount, setSecondAccount] = useState<SecondaryAccount | null>(null);
+  const [savedAccounts, setSavedAccounts] = useState<SecondaryAccount[]>([]);
   const [showSecondAccountForm, setShowSecondAccountForm] = useState(false);
   // Creating a secondary account state
   const [secName, setSecName] = useState('');
@@ -182,6 +183,16 @@ export default function SettingsPage({ onClose, onSave, initialData, isNewUser, 
     const cachedSec = BusinessStore.getAlternativeAccount(currentUserUid);
     if (cachedSec) {
       setSecondAccount(cachedSec);
+    }
+
+    // Load unlimited device accounts
+    const deviceAccounts = localStorage.getItem('imchat_device_accounts');
+    if (deviceAccounts) {
+      try {
+        setSavedAccounts(JSON.parse(deviceAccounts));
+      } catch (err) {
+        console.error("Failed to parse device accounts", err);
+      }
     }
   }, [currentUserUid]);
 
@@ -284,10 +295,8 @@ export default function SettingsPage({ onClose, onSave, initialData, isNewUser, 
     }
   };
 
-  // Switch between 2 Accounts simulation
-  const handleSwitchAccount = () => {
-    if (!secondAccount) return;
-    
+  // Switch to a specific saved account
+  const handleSwitchToSpecificAccount = (acc: SecondaryAccount) => {
     // Create a backup of primary account details
     const currentPrimaryBackup: SecondaryAccount = {
       id: currentUserUid,
@@ -308,26 +317,40 @@ export default function SettingsPage({ onClose, onSave, initialData, isNewUser, 
     };
 
     // Swap states
-    setName(secondAccount.name);
-    setSurname(secondAccount.surname);
-    setUsername(secondAccount.username);
-    setAvatar(secondAccount.avatar);
-    setBio(secondAccount.bio);
-    setAge(secondAccount.age);
-    setGender(secondAccount.gender);
-    setPhone(secondAccount.phone);
-    setCity(secondAccount.city || '');
-    setEmail(secondAccount.email);
-    setWalletBalance(secondAccount.walletBalance);
-    setIsBusinessAccount(secondAccount.isBusinessAccount);
-    setBusinessName(secondAccount.businessName || '');
-    setBusinessCategory(secondAccount.businessCategory || 'Entertainment');
+    setName(acc.name);
+    setSurname(acc.surname);
+    setUsername(acc.username);
+    setAvatar(acc.avatar);
+    setBio(acc.bio);
+    setAge(acc.age);
+    setGender(acc.gender);
+    setPhone(acc.phone);
+    setCity(acc.city || '');
+    setEmail(acc.email);
+    setWalletBalance(acc.walletBalance);
+    setIsBusinessAccount(acc.isBusinessAccount);
+    setBusinessName(acc.businessName || '');
+    setBusinessCategory(acc.businessCategory || 'Entertainment');
 
-    // Save backup as the secondary account
-    setSecondAccount(currentPrimaryBackup);
-    BusinessStore.saveAlternativeAccount(currentUserUid, currentPrimaryBackup);
+    // Remove targeted account from saved accounts and insert current primary backup
+    const otherSaved = savedAccounts.filter(item => item.username !== acc.username);
+    const updated = [currentPrimaryBackup, ...otherSaved];
 
-    alert(`Account switched successfully! You are now logged in as @${secondAccount.username}`);
+    setSavedAccounts(updated);
+    localStorage.setItem('imchat_device_accounts', JSON.stringify(updated));
+
+    // Also update secondAccount for compatibility
+    setSecondAccount(updated[0] || null);
+
+    alert(`Account switched successfully! You are now logged in as @${acc.username}`);
+  };
+
+  const handleSwitchAccount = () => {
+    if (savedAccounts.length > 0) {
+      handleSwitchToSpecificAccount(savedAccounts[0]);
+    } else if (secondAccount) {
+      handleSwitchToSpecificAccount(secondAccount);
+    }
   };
 
   // Creating a secondary account
@@ -358,10 +381,22 @@ export default function SettingsPage({ onClose, onSave, initialData, isNewUser, 
       isBusinessAccount: false
     };
 
+    const updated = [newSec, ...savedAccounts];
+    setSavedAccounts(updated);
+    localStorage.setItem('imchat_device_accounts', JSON.stringify(updated));
+
     setSecondAccount(newSec);
-    BusinessStore.saveAlternativeAccount(currentUserUid, newSec);
     setShowSecondAccountForm(false);
-    alert(`Secondary account @${newSec.username} created successfully. You can now switch accounts!`);
+    
+    // Clear inputs
+    setSecName('');
+    setSecSurname('');
+    setSecUsername('');
+    setSecBio('');
+    setSecPhone('');
+    setSecEmail('');
+
+    alert(`Secondary account @${newSec.username} created successfully. You can switch to it anytime!`);
   };
 
   // Buy advertisements using wallet balance
@@ -902,7 +937,7 @@ export default function SettingsPage({ onClose, onSave, initialData, isNewUser, 
               <h3 className="font-extrabold text-[15px] text-gray-800 border-b pb-1">SWITCH / ADD ACCOUNT</h3>
               
               <p className="text-xs text-gray-500 font-medium leading-relaxed">
-                IMChat allows registering up to 2 accounts on the same device to instantly switch between personal and public profiles.
+                IMChat allows registering and switching between an unlimited number of accounts on the same device. Instantly swap personal, alternative or business profiles!
               </p>
 
               {/* Active current account */}
@@ -916,61 +951,73 @@ export default function SettingsPage({ onClose, onSave, initialData, isNewUser, 
                     <span className="font-bold text-sm text-gray-900">{name || 'User'} @{username || 'user'}</span>
                   </div>
                 </div>
-                <span className="bg-blue-600 text-white font-mono text-[9px] font-black uppercase px-2.5 py-1 rounded-full animate-pulse">SESSION 1</span>
+                <span className="bg-blue-600 text-white font-mono text-[9px] font-black uppercase px-2.5 py-1 rounded-full animate-pulse">ACTIVE</span>
               </div>
 
-              {/* Secondary slot option */}
-              {secondAccount ? (
-                <div className="bg-white border border-gray-200 p-4 rounded-xl flex items-center justify-between shadow-sm hover:bg-gray-50 transition-colors">
-                  <div className="flex items-center gap-3">
-                    <div className="w-12 h-12 rounded-full overflow-hidden bg-gray-200 border border-gray-100">
-                      <img src={secondAccount.avatar} className="w-full h-full object-cover" />
-                    </div>
-                    <div className="flex flex-col text-left">
-                      <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wide">Saved Account</span>
-                      <span className="font-bold text-sm text-gray-900">{secondAccount.name} @{secondAccount.username}</span>
-                    </div>
+              {/* Saved accounts list */}
+              <div className="space-y-3">
+                <span className="text-xs font-bold text-gray-400 uppercase tracking-wider block">Saved Device Accounts ({savedAccounts.length})</span>
+                {savedAccounts.length > 0 ? (
+                  <div className="space-y-2.5 max-h-[300px] overflow-y-auto pr-1">
+                    {savedAccounts.map((acc, index) => (
+                      <div key={acc.id || index} className="bg-white border border-gray-100 p-3.5 rounded-xl flex items-center justify-between shadow-sm hover:border-gray-200 hover:bg-gray-50 transition-all">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="w-10 h-10 rounded-full overflow-hidden bg-gray-150 border border-gray-100 shrink-0">
+                            <img src={acc.avatar} className="w-full h-full object-cover" />
+                          </div>
+                          <div className="flex flex-col text-left min-w-0">
+                            <span className="font-bold text-sm text-gray-900 truncate">{acc.name}</span>
+                            <span className="text-xs text-gray-500 font-mono font-medium truncate">@{acc.username}</span>
+                          </div>
+                        </div>
+                        
+                        <div className="flex gap-2 shrink-0 ml-2">
+                          <button 
+                            onClick={() => handleSwitchToSpecificAccount(acc)}
+                            className="bg-gray-950 hover:bg-black text-white font-bold text-xs px-3.5 py-1.5 rounded-lg active:scale-95 transition-all cursor-pointer"
+                          >
+                            Switch
+                          </button>
+                          <button 
+                            onClick={() => {
+                              if (confirm(`Delete the saved account @${acc.username} from this device?`)) {
+                                const updated = savedAccounts.filter(item => item.username !== acc.username);
+                                setSavedAccounts(updated);
+                                localStorage.setItem('imchat_device_accounts', JSON.stringify(updated));
+                                if (secondAccount?.username === acc.username) {
+                                  setSecondAccount(updated[0] || null);
+                                }
+                              }
+                            }}
+                            className="p-1.5 border border-red-100 text-red-500 hover:bg-red-50 hover:border-red-200 rounded-lg active:scale-95 transition-all"
+                            title="Remove Account"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                  
-                  <div className="flex gap-2">
-                    <button 
-                      onClick={handleSwitchAccount}
-                      className="bg-gray-900 hover:bg-black text-white font-black text-xs px-3.5 py-2 rounded-lg cursor-pointer"
-                    >
-                      Switch
-                    </button>
-                    <button 
-                      onClick={() => {
-                        if (confirm('Delete the second saved account from this device?')) {
-                          setSecondAccount(null);
-                          localStorage.removeItem(`imchat_sec_acc_${currentUserUid}`);
-                        }
-                      }}
-                      className="p-2 border border-red-200 text-red-500 hover:bg-red-50 rounded-lg"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                ) : (
+                  <div className="border border-dashed border-gray-200 p-4 rounded-xl text-center text-xs text-gray-400 font-medium">
+                    No alternative accounts registered on this device yet.
                   </div>
-                </div>
-              ) : (
-                <div className="bg-dashed border-2 border-gray-200 p-5 rounded-2xl flex flex-col items-center justify-center text-center gap-3">
-                  <PlusCircle className="w-10 h-10 text-gray-300" />
-                  <div className="space-y-1">
-                    <span className="text-xs font-bold text-gray-800 uppercase block">No Second Account</span>
-                    <span className="text-[11px] text-gray-400 font-medium">Create an alternative or business account for this device</span>
-                  </div>
-                  <button
-                    onClick={() => {
-                      setSecUsername(username ? username + '_2' : 'user2');
-                      setSecName(name ? name + ' Alt' : 'Alt Account');
-                      setShowSecondAccountForm(true);
-                    }}
-                    className="mt-1 bg-gray-900 hover:bg-black text-white font-black text-xs px-4 py-2.5 rounded-xl shadow-md transition-all cursor-pointer"
-                  >
-                    Add Secondary Account
-                  </button>
-                </div>
-              )}
+                )}
+              </div>
+
+              {/* Add Account Trigger */}
+              <div className="pt-2">
+                <button
+                  onClick={() => {
+                    setSecUsername(username ? username + '_alt' : 'user_alt');
+                    setSecName(name ? name + ' Alt' : 'Alt Account');
+                    setShowSecondAccountForm(true);
+                  }}
+                  className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-bold text-sm py-3 px-4 rounded-xl shadow-md active:scale-95 transition-all cursor-pointer"
+                >
+                  <PlusCircle className="w-4 h-4" /> Register New Account / Switcher
+                </button>
+              </div>
 
               {/* Second Account Multi-Form modal */}
               {showSecondAccountForm && (

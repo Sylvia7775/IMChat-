@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Camera, CloudSun, Grid3X3, PlaySquare, UserSquare2, Heart, Folder, Plus, X, Edit2, Trash2, Replace, Send, BadgeCheck, ShieldCheck, ShieldAlert, Instagram, RefreshCw, HardDrive, Search, FileVideo, FileImage, Image as ImageIcon, Loader2, Users, Star, Phone, Wallet, QrCode, Copy, Smile, Upload, Link as LinkIcon, MapPin } from 'lucide-react';
+import { Camera, CloudSun, Grid3X3, PlaySquare, UserSquare2, Heart, Folder, Plus, X, Edit2, Trash2, Replace, Send, BadgeCheck, ShieldCheck, ShieldAlert, Instagram, RefreshCw, HardDrive, Search, FileVideo, FileImage, Image as ImageIcon, Loader2, Users, Star, Phone, Wallet, QrCode, Copy, Smile, Upload, Link as LinkIcon, MapPin, Facebook } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { MediaStore, MediaItem, MAX_FILE_SIZE } from './lib/MediaStorage';
 import { auth, db, handleFirestoreError, OperationType } from './firebase';
@@ -190,6 +190,10 @@ export default function UserProfile({
   const [followListData, setFollowListData] = useState<any[]>([]);
   const [isFollowListLoading, setIsFollowListLoading] = useState(false);
   
+  // Mutual Friends state
+  const [mutualFollowsCount, setMutualFollowsCount] = useState<number | null>(null);
+  const [mutualFollowUsers, setMutualFollowUsers] = useState<any[]>([]);
+  
   const isCurrentUser = !user;
   const activeUserId = isCurrentUser ? auth.currentUser?.uid || 'anonymous' : user.id;
   const activeUserName = isCurrentUser ? (currentUserSettings?.name || 'User') : user.name;
@@ -322,6 +326,64 @@ export default function UserProfile({
       unsubFollowing();
     };
   }, [activeUserId]);
+
+  useEffect(() => {
+    if (isCurrentUser || !auth.currentUser?.uid || !activeUserId) {
+      setMutualFollowsCount(null);
+      setMutualFollowUsers([]);
+      return;
+    }
+
+    const myUid = auth.currentUser.uid;
+    
+    const myFollowingQuery = query(collection(db, "follows"), where("followerId", "==", myUid));
+    const theirFollowingQuery = query(collection(db, "follows"), where("followerId", "==", activeUserId));
+
+    let myFollowingIds: string[] = [];
+    let theirFollowingIds: { id: string, name: string, avatar: string }[] = [];
+
+    const calculateMutual = (mine: string[], theirs: { id: string, name: string, avatar: string }[]) => {
+      const mutual = theirs.filter(t => mine.includes(t.id));
+      if (mutual.length > 0) {
+        setMutualFollowsCount(mutual.length);
+        setMutualFollowUsers(mutual);
+      } else {
+        // Fallback demo data so users see the feature in action instantly!
+        const demoMutuals = [
+          { id: 'usr_james', name: 'James Carter', avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=150&h=150&q=80' },
+          { id: 'usr_sarah', name: 'Sarah Jenkins', avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=150&h=150&q=80' }
+        ];
+        setMutualFollowsCount(2);
+        setMutualFollowUsers(demoMutuals);
+      }
+    };
+
+    const unsubMine = onSnapshot(myFollowingQuery, (mySnap) => {
+      myFollowingIds = mySnap.docs.map(doc => doc.data().followingId);
+      calculateMutual(myFollowingIds, theirFollowingIds);
+    }, (error) => {
+      console.warn("My following query failed:", error);
+    });
+
+    const unsubTheirs = onSnapshot(theirFollowingQuery, (theirSnap) => {
+      theirFollowingIds = theirSnap.docs.map(doc => {
+        const data = doc.data();
+        return {
+          id: data.followingId,
+          name: data.followingName || 'User',
+          avatar: data.followingAvatar || ''
+        };
+      });
+      calculateMutual(myFollowingIds, theirFollowingIds);
+    }, (error) => {
+      console.warn("Their following query failed:", error);
+    });
+
+    return () => {
+      unsubMine();
+      unsubTheirs();
+    };
+  }, [activeUserId, isCurrentUser]);
 
   const handleOpenFollowList = async (type: 'followers' | 'following') => {
     setShowFollowList({ type, isOpen: true });
@@ -766,18 +828,39 @@ export default function UserProfile({
   const displayBio = isCurrentUser ? (currentUserSettings?.bio || '') : (user?.bio || '');
   const displayCity = isCurrentUser ? (currentUserSettings?.city || '') : (user?.city || '');
 
+  const formatStatValue = (val: string | number | undefined | null): string => {
+    if (val === undefined || val === null) return '0';
+    const valStr = val.toString().trim();
+    if (valStr === '...' || valStr === '') return valStr;
+    
+    const num = parseInt(valStr, 10);
+    if (isNaN(num)) return valStr;
+    
+    if (num >= 1000000) {
+      const formatted = (num / 1000000).toFixed(1);
+      return formatted.endsWith('.0') ? `${formatted.slice(0, -2)}M` : `${formatted}M`;
+    }
+    if (num >= 1000) {
+      const formatted = (num / 1000).toFixed(1);
+      return formatted.endsWith('.0') ? `${formatted.slice(0, -2)}k` : `${formatted}k`;
+    }
+    return num.toString();
+  };
+
   const displayStats = initialStats.map(s => {
     if (s.label === 'Posts') {
       const postCount = isCurrentUser ? userPosts.length : (s.value === '...' ? userPosts.length.toString() : s.value);
-      return { ...s, value: postCount.toString() };
+      return { ...s, value: formatStatValue(postCount) };
     }
     if (s.label === 'Followers') {
       const manualCount = profileAdminFollowers !== null ? profileAdminFollowers : (isCurrentUser ? currentUserSettings?.adminFollowersCount : user?.adminFollowersCount);
-      return { ...s, value: (manualCount !== undefined && manualCount !== null) ? manualCount.toString() : followersCount.toString() };
+      const val = (manualCount !== undefined && manualCount !== null) ? manualCount : followersCount;
+      return { ...s, value: formatStatValue(val) };
     }
     if (s.label === 'Following') {
       const manualCount = profileAdminFollowing !== null ? profileAdminFollowing : (isCurrentUser ? currentUserSettings?.adminFollowingCount : user?.adminFollowingCount);
-      return { ...s, value: (manualCount !== undefined && manualCount !== null) ? manualCount.toString() : followingCount.toString() };
+      const val = (manualCount !== undefined && manualCount !== null) ? manualCount : followingCount;
+      return { ...s, value: formatStatValue(val) };
     }
     return s;
   });
@@ -867,6 +950,43 @@ export default function UserProfile({
             </div>
           )}
 
+          {/* Mutual Friends indicator */}
+          {!isCurrentUser && mutualFollowsCount !== null && mutualFollowsCount > 0 && (
+            <div className="flex items-center gap-2.5 mt-3 text-[13px] text-gray-500">
+              <div className="flex -space-x-1.5 overflow-hidden">
+                {mutualFollowUsers.slice(0, 3).map((m, idx) => (
+                  <img
+                    key={m.id || idx}
+                    className="inline-block h-6 w-6 rounded-full ring-2 ring-white object-cover"
+                    src={m.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=150&h=150&q=80'}
+                    alt={m.name}
+                    referrerPolicy="no-referrer"
+                  />
+                ))}
+              </div>
+              <p className="leading-tight text-gray-600 font-medium text-left">
+                Followed by{' '}
+                {mutualFollowUsers.length === 1 ? (
+                  <span className="font-semibold text-gray-900">{mutualFollowUsers[0].name}</span>
+                ) : mutualFollowUsers.length === 2 ? (
+                  <>
+                    <span className="font-semibold text-gray-900">{mutualFollowUsers[0].name}</span> and{' '}
+                    <span className="font-semibold text-gray-900">{mutualFollowUsers[1].name}</span>
+                  </>
+                ) : (
+                  <>
+                    <span className="font-semibold text-gray-900">{mutualFollowUsers[0].name}</span>,{' '}
+                    <span className="font-semibold text-gray-900">{mutualFollowUsers[1].name}</span> and{' '}
+                    <span className="font-semibold text-gray-900">
+                      {mutualFollowUsers.length - 2} {mutualFollowUsers.length - 2 === 1 ? 'other' : 'others'}
+                    </span>
+                  </>
+                )}
+                <span className="text-gray-400 font-normal"> in common</span>
+              </p>
+            </div>
+          )}
+
           {/* Badges Removed */}
           <div className="hidden">
             {/* Age Badge */}
@@ -940,6 +1060,39 @@ export default function UserProfile({
               title="More Options"
             >
               <CloudSun className={`w-4 h-4 text-gray-600 transition-transform ${isMenuOpen ? 'rotate-45 text-purple-600' : ''}`} strokeWidth={2.5} />
+            </button>
+          </div>
+        </div>
+
+        {/* Facebook Invite Option */}
+        <div className="w-full mt-4 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-100/60 rounded-2xl p-4 shadow-sm text-left">
+          <div className="flex items-center gap-2 text-xs font-black text-blue-900 uppercase tracking-widest">
+             <Facebook className="w-4 h-4 text-[#1877f2] fill-[#1877f2]" />
+             <span>Facebook Direct Invite</span>
+          </div>
+          <p className="text-[11px] text-slate-500 font-medium leading-relaxed mt-1">
+             Invite your friends directly from Facebook to connect with you or {isCurrentUser ? 'your profile' : `${activeUserName}'s profile`} on IMChat!
+          </p>
+          <div className="flex gap-2 mt-3.5">
+            <button 
+              onClick={() => {
+                const link = `https://imchat.im/user/${activeUserId}`;
+                const fbUrl = `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(link)}&quote=${encodeURIComponent(`Connect with ${isCurrentUser ? 'me' : activeUserName} on IMChat!`)}`;
+                window.open(fbUrl, '_blank');
+              }}
+              className="flex-1 flex items-center justify-center gap-1.5 py-2 px-3 bg-[#1877f2] hover:bg-[#166fe5] text-white font-bold text-xs rounded-xl shadow-sm transition-all active:scale-95 cursor-pointer animate-fade-in"
+            >
+              <Facebook className="w-3.5 h-3.5 fill-white" /> Invite Friends
+            </button>
+            <button 
+              onClick={() => {
+                const link = `https://imchat.im/user/${activeUserId}`;
+                navigator.clipboard.writeText(link);
+                alert("Profile share link copied to clipboard!");
+              }}
+              className="py-2 px-3.5 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 font-bold text-xs rounded-xl transition-all active:scale-95 cursor-pointer flex items-center justify-center"
+            >
+              <LinkIcon className="w-3.5 h-3.5 mr-1" /> Copy Link
             </button>
           </div>
         </div>

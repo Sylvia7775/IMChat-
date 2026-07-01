@@ -540,10 +540,10 @@ export default function UserDirectory({
                         e.stopPropagation();
                         onToggleFollow(user.id);
                       }}
-                      className={`px-5 py-2.5 text-[13px] font-bold rounded-xl transition-all active:scale-95 shadow-sm shrink-0 ml-2 min-w-[95px] text-center ${
+                      className={`px-5 py-[7px] text-[13px] font-semibold rounded-lg transition-all active:scale-95 shadow-sm shrink-0 ml-2 ${
                         isFollowing 
-                          ? 'bg-[#8b5cf6] hover:bg-[#7c3aed] text-white shadow-purple-200/10' 
-                          : 'bg-brand-blue text-white hover:bg-blue-600'
+                          ? 'bg-gradient-to-r from-[#7e22ce] to-[#9333ea] text-white shadow-purple-200/20' 
+                          : 'bg-brand-blue text-white border border-brand-blue hover:bg-blue-600'
                       }`}
                     >
                       {isFollowing ? 'Following' : 'Follow'}

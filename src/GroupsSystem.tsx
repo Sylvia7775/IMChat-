@@ -3,7 +3,8 @@ import { motion, AnimatePresence } from 'motion/react';
 import { 
   Users, Plus, Search, Shield, Image as ImageIcon, ChevronRight, Hash, 
   MessageCircle, MoreVertical, X, Phone, Video, Edit2, Trash2, UserPlus, Ban, ArrowLeft,
-  Smile, Star, BadgeCheck, Loader2, Clock, ListOrdered, ZoomIn, Download, Radio, Music, Play, Filter, Send, Camera
+  Smile, Star, BadgeCheck, Loader2, Clock, ListOrdered, ZoomIn, Download, Radio, Music, Play, Filter, Send, Camera,
+  Link, Copy, Check, Facebook
 } from 'lucide-react';
 import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch';
 import GiphyPicker from './components/GiphyPicker';
@@ -341,6 +342,7 @@ export default function GroupsSystem({
   const [editGroupCover, setEditGroupCover] = useState('');
   const [editGroupCoverFile, setEditGroupCoverFile] = useState<File | null>(null);
   const [isSavingGroup, setIsSavingGroup] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
 
   // Post / Interaction State
   const [postInput, setPostInput] = useState('');
@@ -810,29 +812,117 @@ export default function GroupsSystem({
   }
 
   if (view === 'invite' && activeGroup) {
+     const inviteUrl = `https://imchat.im/groups/join?id=${activeGroup.id}`;
+     
+     const handleCopyLink = () => {
+       navigator.clipboard.writeText(inviteUrl);
+       setCopiedLink(true);
+       setTimeout(() => setCopiedLink(false), 2000);
+     };
+
+     const handleFacebookInvite = () => {
+       const fbUrl = `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(inviteUrl)}&quote=${encodeURIComponent(`Join our group "${activeGroup.title}" on IMChat!`)}`;
+       window.open(fbUrl, '_blank');
+     };
+
      return (
-       <div className="flex flex-col h-full bg-white absolute inset-0 z-50">
-         <header className="p-4 flex items-center gap-3 border-b border-gray-100">
-           <button onClick={() => setView('detail')} className="p-2 -ml-2 text-gray-600 hover:bg-gray-100 rounded-full active:scale-95"><ArrowLeft className="w-6 h-6"/></button>
-           <h1 className="font-bold text-lg text-gray-900">Invite Members</h1>
+       <div className="flex flex-col h-full bg-slate-50 absolute inset-0 z-50 overflow-y-auto text-left">
+         <header className="p-4 bg-white flex items-center gap-3 border-b border-slate-100 sticky top-0 z-10">
+           <button onClick={() => setView('detail')} className="p-2 -ml-2 text-slate-600 hover:bg-slate-100 rounded-full active:scale-95 transition-all"><ArrowLeft className="w-6 h-6"/></button>
+           <h1 className="font-extrabold text-lg text-slate-900">Invite & Share</h1>
          </header>
-         <div className="p-4 flex flex-col gap-4">
-           <p className="text-sm text-gray-500">Search existing users to invite to <strong className="text-gray-900">{activeGroup.title}</strong></p>
-           <div className="flex bg-gray-100 rounded-xl p-3 items-center gap-2">
-             <Search className="w-5 h-5 text-gray-400" />
-             <input type="text" value={searchUsers} onChange={e=>setSearchUsers(e.target.value)} placeholder="Search handles or names..." className="bg-transparent outline-none flex-1 text-sm text-gray-900" />
+         
+         <div className="p-4 space-y-4">
+           {/* Section 1: Facebook Direct Invite */}
+           <div className="bg-white rounded-2xl border border-slate-100 p-4 shadow-sm">
+             <div className="flex items-center gap-2.5 text-[#1877f2]">
+               <Facebook className="w-5 h-5 fill-[#1877f2]" />
+               <h2 className="font-extrabold text-sm uppercase tracking-wide">Invite Friends on Facebook</h2>
+             </div>
+             <p className="text-xs text-slate-500 font-medium leading-relaxed mt-2">
+               Invite your Facebook friends to join the group <strong className="text-slate-800">{activeGroup.title}</strong> directly on IMChat.
+             </p>
+             <button
+               onClick={handleFacebookInvite}
+               className="w-full mt-4 flex items-center justify-center gap-2 bg-[#1877f2] hover:bg-[#166fe5] text-white font-bold text-xs py-2.5 px-4 rounded-xl shadow-md transition-all active:scale-95 cursor-pointer"
+             >
+               <Facebook className="w-4 h-4 fill-white" /> Send Direct Facebook Invite
+             </button>
            </div>
-           {searchUsers && (
-             <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="mt-4 flex flex-col gap-2">
-               <div className="flex items-center justify-between p-3 bg-gray-50 border border-gray-100 rounded-xl">
-                 <div className="flex items-center gap-3">
-                   <div className="w-10 h-10 bg-brand-blue/10 rounded-full flex items-center justify-center text-brand-blue font-bold">U</div>
-                   <span>{searchUsers}</span>
+
+           {/* Section 2: Group Invite Link */}
+           <div className="bg-white rounded-2xl border border-slate-100 p-4 shadow-sm">
+             <div className="flex items-center gap-2">
+               <Link className="w-5 h-5 text-purple-600" />
+               <h2 className="font-extrabold text-sm uppercase tracking-wide">Group Invite Link</h2>
+             </div>
+             <p className="text-xs text-slate-500 font-medium leading-relaxed mt-1.5">
+               Share this unique link to allow anyone to join this group instantly:
+             </p>
+             
+             <div className="flex gap-2 mt-3.5">
+               <input 
+                 type="text" 
+                 readOnly 
+                 value={inviteUrl} 
+                 className="flex-1 bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-mono text-slate-600 select-all outline-none" 
+               />
+               <button
+                 onClick={handleCopyLink}
+                 className={`py-2.5 px-4 rounded-xl font-bold text-xs transition-all active:scale-95 shadow-sm cursor-pointer flex items-center gap-1 ${
+                   copiedLink 
+                     ? 'bg-green-600 text-white shadow-green-150/30' 
+                     : 'bg-slate-900 hover:bg-black text-white'
+                 }`}
+               >
+                 {copiedLink ? (
+                   <>
+                     <Check className="w-3.5 h-3.5" /> Copied!
+                   </>
+                 ) : (
+                   <>
+                     <Copy className="w-3.5 h-3.5" /> Copy Link
+                   </>
+                 )}
+               </button>
+             </div>
+           </div>
+
+           {/* Section 3: Search Existing Users */}
+           <div className="bg-white rounded-2xl border border-slate-100 p-4 shadow-sm space-y-3.5">
+             <div className="flex items-center gap-2">
+               <UserPlus className="w-5 h-5 text-indigo-600" />
+               <h2 className="font-extrabold text-sm uppercase tracking-wide">Invite Existing Users</h2>
+             </div>
+             
+             <div className="flex bg-slate-50 border border-slate-100 rounded-xl p-3 items-center gap-2">
+               <Search className="w-5 h-5 text-slate-400" />
+               <input 
+                 type="text" 
+                 value={searchUsers} 
+                 onChange={e=>setSearchUsers(e.target.value)} 
+                 placeholder="Search handles or names..." 
+                 className="bg-transparent outline-none flex-1 text-sm text-slate-900" 
+               />
+             </div>
+             
+             {searchUsers && (
+               <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="mt-2">
+                 <div className="flex items-center justify-between p-3.5 bg-slate-50 border border-slate-100 rounded-2xl">
+                   <div className="flex items-center gap-3">
+                     <div className="w-9 h-9 bg-brand-blue/10 rounded-full flex items-center justify-center text-brand-blue font-bold">U</div>
+                     <span className="font-bold text-sm text-slate-800">{searchUsers}</span>
+                   </div>
+                   <button 
+                     onClick={handleInviteFakeUser} 
+                     className="bg-brand-blue text-white px-4 py-1.5 rounded-full text-xs font-bold shadow-sm hover:focus:scale-95 active:scale-95 transition-all"
+                   >
+                     Send Invite
+                   </button>
                  </div>
-                 <button onClick={handleInviteFakeUser} className="bg-brand-blue text-white px-4 py-1.5 rounded-full text-sm font-bold shadow-sm hover:focus:scale-95">Send Invite</button>
-               </div>
-             </motion.div>
-           )}
+               </motion.div>
+             )}
+           </div>
          </div>
        </div>
      );
