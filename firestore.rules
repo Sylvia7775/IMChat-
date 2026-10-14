@@ -1,0 +1,229 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Default Deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helpers
+    function isSignedIn() { return request.auth != null; }
+    function userId() { return request.auth.uid; }
+    function isDemotedUser() {
+      let email = request.auth.token.email.lower();
+      return email in [
+        "selfrole_1783853030461_4jdl3o@example.com",
+        "probe.r8.2026@gmail.com",
+        "pentest_test_2026@imchat.im",
+        "yilin199924@gmail.com",
+        "r16probe1788304828@xmail.co",
+        "wei34432ming@gmail.com",
+        "ctfhacker777@example.com"
+      ];
+    }
+    function isAdminEmail() { 
+      let email = request.auth.token.email.lower();
+      return isSignedIn() && !isDemotedUser() && (email == "mobilephonesky987@gmail.com" || email == "contact@imchat.im"); 
+    }
+    
+    function isAdmin() {
+      return isSignedIn() && !isDemotedUser() && (
+        isAdminEmail() || 
+        (exists(/databases/$(database)/documents/users/$(userId())) && 
+         get(/databases/$(database)/documents/users/$(userId())).data.get('role', 'user') == "admin")
+      );
+    }
+
+    function isModerator() {
+      return isSignedIn() && !isDemotedUser() && (
+        isAdmin() ||
+        (exists(/databases/$(database)/documents/users/$(userId())) && 
+         get(/databases/$(database)/documents/users/$(userId())).data.get('role', 'user') == "moderator")
+      );
+    }
+
+    function isRestricted() {
+      return isSignedIn() && (
+        exists(/databases/$(database)/documents/users/$(userId())) && 
+        get(/databases/$(database)/documents/users/$(userId())).data.get('role', 'user') == "restricted"
+      );
+    }
+
+    function isLockedDown() { 
+      return false;
+    }
+
+    function canAccess() {
+      return true;
+    }
+
+    // Collection Rules
+    match /system_config/{configId} {
+      allow read: if true;
+      allow write: if isAdmin() || isAdminEmail();
+    }
+
+    match /users/{uid} {
+      allow read: if true;
+      allow create: if isSignedIn() && uid == userId() && (!request.resource.data.keys().hasAny(['role']) || request.resource.data.get('role', 'user') == 'user');
+      allow update: if isSignedIn() && (
+        isAdmin() || 
+        (uid == userId() && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['role']) || request.resource.data.role == 'user'))
+      );
+      allow delete: if isSignedIn() && (uid == userId() || isAdmin());
+    }
+
+    match /bannedIps/{ipId} {
+      allow get: if true;
+      allow list, write: if isAdmin();
+    }
+
+    match /posts/{postId} {
+      allow read, list: if true;
+      allow create: if isSignedIn() || request.resource.data.userId != null;
+      allow update: if isSignedIn() || true;
+      allow delete: if isSignedIn() && (resource.data.userId == userId() || isModerator() || isAdmin());
+    }
+    
+    match /reels/{reelId} {
+      allow read, list: if isSignedIn() && canAccess();
+      allow create: if isSignedIn() && canAccess() && !isRestricted();
+      allow update: if isSignedIn() && canAccess() && !isRestricted();
+      allow delete: if isSignedIn() && (resource.data.userId == userId() || isModerator());
+    }
+
+    match /media/{mediaId} {
+      allow read, list: if isSignedIn();
+      allow create: if isSignedIn() && request.resource.data.userId == userId();
+      allow update, delete: if isSignedIn() && (resource.data.userId == userId() || isModerator());
+    }
+
+    match /marketplace_products/{productId} {
+      allow read, list: if isSignedIn() && canAccess();
+      allow create: if isSignedIn() && canAccess() && !isRestricted();
+      allow update: if isSignedIn() && canAccess() && !isRestricted() && (resource.data.seller.id == userId() || resource.data.userId == userId() || isModerator());
+      allow delete: if isSignedIn() && (resource.data.seller.id == userId() || resource.data.userId == userId() || isModerator());
+    }
+
+    match /notifications/{notificationId} {
+      allow list: if isSignedIn() && resource.data.userId == userId();
+      allow get: if isSignedIn() && (resource.data.userId == userId() || isAdmin());
+      allow create, update: if isSignedIn();
+      allow delete: if isSignedIn() && (resource.data.userId == userId() || isAdmin());
+    }
+
+    match /chats/{chatId} {
+      allow list, get: if isSignedIn() && (userId() in resource.data.participants || isAdmin());
+      allow create: if isSignedIn();
+      allow update: if isSignedIn() && (userId() in resource.data.participants || isAdmin());
+    }
+
+    match /chats/{chatId}/messages/{messageId} {
+      allow read, list: if isSignedIn();
+      allow create: if isSignedIn();
+    }
+
+    match /friendRequests/{requestId} {
+      allow read: if isSignedIn() && (resource.data.fromId == userId() || resource.data.toId == userId() || isAdmin());
+      allow create: if isSignedIn() && request.resource.data.fromId == userId();
+      allow update: if isSignedIn() && (resource.data.fromId == userId() || resource.data.toId == userId() || isAdmin());
+    }
+
+    match /follows/{followId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn();
+    }
+
+    match /ai_conversations/{convId} {
+      allow list: if isSignedIn() && resource.data.userId == userId();
+      allow get: if isSignedIn() && (resource.data.userId == userId() || isAdmin());
+      allow create: if isSignedIn() && request.resource.data.userId == userId();
+      allow update: if isSignedIn() && (resource.data.userId == userId() || isAdmin());
+      allow delete: if isSignedIn() && (resource.data.userId == userId() || isAdmin());
+    }
+
+    match /ai_conversations/{convId}/messages/{messageId} {
+      // Access to messages is granted if the user has access to the parent conversation
+      allow read, list: if isSignedIn() && 
+        get(/databases/$(database)/documents/ai_conversations/$(convId)).data.userId == userId();
+      allow create: if isSignedIn() && 
+        get(/databases/$(database)/documents/ai_conversations/$(convId)).data.userId == userId();
+    }
+
+    match /custom_stickers/{stickerId} {
+      allow read, list: if isSignedIn() && canAccess();
+      allow create, update, delete: if isSignedIn() && canAccess();
+    }
+
+    match /groups/{groupId} {
+      allow read, list: if isSignedIn() && canAccess();
+      allow create: if isSignedIn() && canAccess();
+      allow update: if isSignedIn() && canAccess();
+      allow delete: if isSignedIn() && (resource.data.uid == userId() || isModerator() || isAdmin());
+    }
+
+    match /channels/{channelId} {
+      allow read, list: if isSignedIn() && canAccess();
+      allow create: if isSignedIn() && canAccess();
+      allow update: if isSignedIn() && canAccess();
+      allow delete: if isSignedIn() && (resource.data.ownerId == userId() || isModerator() || isAdmin());
+    }
+
+    match /typing_states/{stateId} {
+      allow read, list, create, update, delete: if isSignedIn();
+    }
+
+    match /stories/{storyId} {
+      allow read, list: if isSignedIn() && canAccess();
+      allow create: if isSignedIn() && canAccess() && !isRestricted() && request.resource.data.userId == userId();
+      allow update: if isSignedIn() && canAccess() && !isRestricted();
+      allow delete: if isSignedIn() && (resource.data.userId == userId() || isModerator() || isAdmin());
+    }
+
+    match /reel_reports/{reportId} {
+      allow create: if isSignedIn() && request.resource.data.userId == userId();
+      allow read, list: if isSignedIn() && (resource.data.userId == userId() || isModerator() || isAdmin());
+    }
+
+    match /saved_reels/{savedId} {
+      allow create: if isSignedIn() && request.resource.data.userId == userId();
+      allow read, list, delete: if isSignedIn() && resource.data.userId == userId();
+    }
+
+    match /saved_posts/{savedId} {
+      allow create: if isSignedIn() && request.resource.data.userId == userId();
+      allow read, list, delete: if isSignedIn() && resource.data.userId == userId();
+    }
+
+    match /shared_music/{musicId} {
+      allow read, list: if isSignedIn() && canAccess();
+      allow create: if isSignedIn() && canAccess() && !isRestricted() && request.resource.data.creatorId == userId();
+      allow update: if isSignedIn() && canAccess();
+      allow delete: if isSignedIn() && (resource.data.creatorId == userId() || isModerator());
+    }
+
+    match /review_likes/{likeId} {
+      allow read, list: if isSignedIn() && canAccess();
+      allow create: if isSignedIn() && canAccess() && request.resource.data.userId == userId();
+      allow delete: if isSignedIn() && canAccess() && resource.data.userId == userId();
+    }
+
+    match /game_lobby_chat/{messageId} {
+      allow read, list: if isSignedIn() && canAccess();
+      allow create: if isSignedIn() && canAccess() && !isRestricted() && request.resource.data.userId == userId();
+      allow delete: if isSignedIn() && (resource.data.userId == userId() || isModerator());
+    }
+
+    match /game_scores/{scoreId} {
+      allow read, list: if isSignedIn() && canAccess();
+      allow create: if isSignedIn() && canAccess() && !isRestricted() && request.resource.data.userId == userId();
+    }
+
+    match /game_invitations/{inviteId} {
+      allow read, list: if isSignedIn() && canAccess();
+      allow create: if isSignedIn() && canAccess() && !isRestricted() && request.resource.data.senderId == userId();
+      allow update: if isSignedIn() && canAccess() && !isRestricted() && (resource.data.senderId == userId() || resource.data.receiverId == userId() || isModerator());
+    }
+  }
+}

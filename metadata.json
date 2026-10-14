@@ -1,0 +1,11 @@
+{
+  "name": "IMChat",
+  "description": "A feature-rich social media and chat application with profile management, post grids, AI audio & sound tracks, Facebook-style Reels feed with animated video previews, highlights player, and automated video progression.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
